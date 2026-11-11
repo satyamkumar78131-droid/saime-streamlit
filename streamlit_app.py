@@ -287,6 +287,128 @@ def ask_satya(message, history, model, tok):
     return answer, None
 
 
+# ---------- REAL AGENTS (multi-task) ----------
+# Har agent ek asli TOOL use karta hai — sirf text nahi banata.
+# 🔎 Search Agent = web search, 🧮 Math Agent = calculator,
+# 💬 Chat Agent = SATYA V1, ✍️ Writer Agent = SATYA V1 (likhne ke liye).
+# Ek saath kai task bhejoge to har task apne agent ko jayega.
+
+import ast
+import operator as _op
+
+_CALC_OPS = {
+    ast.Add: _op.add, ast.Sub: _op.sub, ast.Mult: _op.mul,
+    ast.Div: _op.truediv, ast.Mod: _op.mod, ast.Pow: _op.pow,
+    ast.USub: _op.neg, ast.UAdd: _op.pos,
+}
+
+
+def safe_calc(expr):
+    """Calculator tool — sirf safe arithmetic, koi code nahi chalata."""
+    try:
+        tree = ast.parse(expr, mode="eval")
+
+        def _eval(node):
+            if isinstance(node, ast.Expression):
+                return _eval(node.body)
+            if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+                return node.value
+            if isinstance(node, ast.BinOp) and type(node.op) in _CALC_OPS:
+                return _CALC_OPS[type(node.op)](_eval(node.left), _eval(node.right))
+            if isinstance(node, ast.UnaryOp) and type(node.op) in _CALC_OPS:
+                return _CALC_OPS[type(node.op)](_eval(node.operand))
+            raise ValueError("not arithmetic")
+
+        return _eval(tree)
+    except Exception:
+        return None
+
+
+_MATH_RE = re.compile(r"^[\d\s\.\+\-\*\/\%\(\)x×÷]+$")
+_WRITE_WORDS = ["likho", "likh", "kahani", "story", "poem", "kavita",
+                "script", "write", "shayari", "geet", "nibandh", "essay"]
+
+
+def detect_math(task):
+    """Task me hisaab hai ya nahi — expression nikalo."""
+    t = task.strip().lower()
+    t = t.replace("x", "*").replace("×", "*").replace("÷", "/")
+    t = re.sub(r"(kitna|hota|hai|kya|=|\?)", " ", t).strip()
+    if _MATH_RE.match(t) and re.search(r"\d", t) and re.search(r"[\+\-\*\/\%]", t):
+        return t
+    return None
+
+
+def classify_agent(task, forced=None):
+    """Task ko sahi agent ko do — ya user ne jo agent chuna hai use."""
+    if forced and forced != "auto":
+        return forced
+    if detect_math(task):
+        return "math"
+    low = task.lower()
+    if any(w in low for w in _WRITE_WORDS):
+        return "writer"
+    if any(w in low for w in FACT_WORDS):
+        return "search"
+    return "chat"
+
+
+AGENT_INFO = {
+    "auto": ("⚡", "Auto"),
+    "search": ("🔎", "Search Agent"),
+    "math": ("🧮", "Math Agent"),
+    "chat": ("💬", "Chat Agent"),
+    "writer": ("✍️", "Writer Agent"),
+}
+
+
+def run_agent(task, history, model, tok, forced=None):
+    """Ek task ko uske agent se karwao — tool use karke, steps ke saath.
+    Returns (answer, source, agent_key, steps)."""
+    # Pehle FAQ — pehchan/greeting jaise sawal seedha yahin se (koi agent nahi).
+    clean = task.strip().lower()
+    if clean in FAQ:
+        answer = FAQ[clean]
+        save_learned_qa(task, answer)
+        return answer, None, "chat", ["💬 Chat Agent: ye to mujhe pehle se pata hai!"]
+    agent = classify_agent(task, forced)
+    steps = []
+    if agent == "math":
+        steps.append("🧮 Math Agent: hisaab kar raha hoon...")
+        expr = detect_math(task)
+        result = safe_calc(expr) if expr else None
+        if result is not None:
+            if isinstance(result, float) and result.is_integer():
+                result = int(result)
+            answer = task.strip() + " = " + str(result)
+            save_learned_qa(task, answer)
+            return answer, None, "math", steps
+        steps.append("🧮 Hisaab samajh nahi aaya — Chat Agent ko bhej raha hoon...")
+        agent = "chat"
+    if agent == "search":
+        steps.append("🔎 Search Agent: web pe dhoondh raha hoon...")
+        web_ans, source = web_search(task)
+        if web_ans:
+            save_learned_qa(task, web_ans)
+            return web_ans, source, "search", steps
+        steps.append("🔎 Web pe nahi mila — Chat Agent se poochh raha hoon...")
+        agent = "chat"
+    if agent == "writer":
+        steps.append("✍️ Writer Agent: likh raha hoon...")
+        answer, source = ask_satya("Ek acchi si " + task.strip(), history, model, tok)
+        return answer, source, "writer", steps
+    steps.append("💬 Chat Agent: soch raha hoon...")
+    answer, source = ask_satya(task, history, model, tok)
+    return answer, source, "chat", steps
+
+
+def split_tasks(message):
+    """Ek message me kai task ho to alag karo (har line ek task)."""
+    lines = [l.strip() for l in message.replace(" / ", "\n").split("\n")]
+    lines = [l for l in lines if l]
+    return lines if lines else [message.strip()]
+
+
 def speak(text):
     """Jawab ko awaaz me badlo (gTTS) — audio bytes wapas karo."""
     try:
@@ -356,37 +478,63 @@ with _hdr_r:
 st.markdown("<div style='border-bottom:1px solid #2a2f32; margin: 2px 0 10px;'></div>",
             unsafe_allow_html=True)
 
+# Agent picker — kaunsa agent kaam kare (Auto = SAIME khud chune)
+if "agent" not in st.session_state:
+    st.session_state.agent = "auto"
+_agent_cols = st.columns(5)
+for _col, _key in zip(_agent_cols, ["auto", "search", "math", "chat", "writer"]):
+    _emoji, _name = AGENT_INFO[_key]
+    _label = _emoji + " " + _name
+    if _col.button(_label, key="agent_" + _key,
+                   use_container_width=True,
+                   type="primary" if st.session_state.agent == _key else "secondary"):
+        st.session_state.agent = _key
+        st.rerun()
 
-def wa_bubble(text, who, source=None):
-    """WhatsApp jaisi bubble dikhao — user RIGHT green, AI LEFT grey."""
+
+def wa_bubble(text, who, source=None, agent=None):
+    """WhatsApp jaisi bubble dikhao — user RIGHT green, AI LEFT grey.
+    AI bubble me upar agent ka naam (kaunsa agent kaam kiya)."""
     safe = _html.escape(text)
+    head = ""
+    if agent and agent in AGENT_INFO:
+        _emoji, _name = AGENT_INFO[agent]
+        head = ("<span style='display:block; font-size:11px; color:#53bdeb; "
+                "font-weight:700; margin-bottom:2px;'>" + _emoji + " " + _name + "</span>")
     src_html = ""
     if source:
         src_html = "<span class='src'>🔎 Source: " + _html.escape(str(source)) + "</span>"
     st.markdown(
         "<div class='wa-row " + who + "'><div class='wa-bubble " + who + "'>"
-        + safe + src_html + "</div></div>",
+        + head + safe + src_html + "</div></div>",
         unsafe_allow_html=True,
     )
 
 
 # Pichla chat dikhao — WhatsApp bubbles
 for m in st.session_state.messages:
-    wa_bubble(m["content"], m["role"], m.get("source"))
+    wa_bubble(m["content"], m["role"], m.get("source"), m.get("agent"))
 
 # Voice (aakhri jawab ki)
 if st.session_state.last_audio:
     st.audio(st.session_state.last_audio, format="audio/mp3")
 
-prompt = st.chat_input("Message likho...")
+prompt = st.chat_input("Message likho... (kai task ek saath: har line ek task)")
 if prompt:
     st.session_state.messages.append({"role": "user", "content": prompt})
     wa_bubble(prompt, "user")
     save_idea(prompt)
-    with st.spinner(""):
-        st.markdown("<div class='wa-typing'>SAIME typing...</div>", unsafe_allow_html=True)
-        answer, source = ask_satya(prompt, st.session_state.messages[:-1], model, tok)
-    wa_bubble(answer, "ai", source)
-    st.session_state.messages.append({"role": "assistant", "content": answer, "source": source})
-    st.session_state.last_audio = speak(answer)
+    tasks = split_tasks(prompt)
+    forced = st.session_state.agent
+    last_answer = ""
+    for task in tasks:
+        st.markdown("<div class='wa-typing'>Agent kaam kar raha hai...</div>",
+                    unsafe_allow_html=True)
+        answer, source, agent_key, steps = run_agent(
+            task, st.session_state.messages[:-1], model, tok, forced)
+        wa_bubble(answer, "ai", source, agent_key)
+        st.session_state.messages.append(
+            {"role": "assistant", "content": answer, "source": source, "agent": agent_key})
+        last_answer = answer
+    st.session_state.last_audio = speak(last_answer)
     st.rerun()
