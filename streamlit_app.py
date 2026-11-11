@@ -409,6 +409,37 @@ def split_tasks(message):
     return lines if lines else [message.strip()]
 
 
+def describe_photo(image_bytes):
+    """Photo ko BLIP se padho (HF Inference API).
+    Token Streamlit secrets se aata hai (HF_TOKEN) — bina token ke None.
+    Returns (caption, error) — error 'no_token' ya 'api_error' ho sakta hai."""
+    try:
+        token = None
+        try:
+            token = st.secrets.get("HF_TOKEN")
+        except Exception:
+            token = None
+        if not token:
+            return None, "no_token"
+        url = ("https://router.huggingface.co/hf-inference/models/"
+               "Salesforce/blip-image-captioning-base")
+        req = urllib.request.Request(
+            url, data=image_bytes,
+            headers={"Authorization": "Bearer " + token,
+                     "Content-Type": "image/jpeg"},
+            method="POST")
+        with urllib.request.urlopen(req, timeout=60) as r:
+            data = json.loads(r.read().decode("utf-8"))
+        if isinstance(data, list) and data and "generated_text" in data[0]:
+            return data[0]["generated_text"].strip(), None
+        if isinstance(data, dict) and "generated_text" in data:
+            return data["generated_text"].strip(), None
+        return None, "api_error"
+    except Exception as e:
+        print("Photo describe error:", e)
+        return None, "api_error"
+
+
 def speak(text):
     """Jawab ko awaaz me badlo (gTTS) — audio bytes wapas karo."""
     try:
@@ -511,15 +542,63 @@ def wa_bubble(text, who, source=None, agent=None):
     )
 
 
-# Pichla chat dikhao — WhatsApp bubbles
+# Pichla chat dikhao — WhatsApp bubbles (photo messages ke saath)
 for m in st.session_state.messages:
-    wa_bubble(m["content"], m["role"], m.get("source"), m.get("agent"))
+    if m.get("photo"):
+        _pc1, _pc2 = st.columns([1, 2])
+        with _pc2:
+            st.image(m["photo"], use_container_width=True)
+        if m.get("content"):
+            wa_bubble(m["content"], m["role"], m.get("source"), m.get("agent"))
+    else:
+        wa_bubble(m["content"], m["role"], m.get("source"), m.get("agent"))
 
 # Voice (aakhri jawab ki)
 if st.session_state.last_audio:
     st.audio(st.session_state.last_audio, format="audio/mp3")
 
 prompt = st.chat_input("Message likho... (kai task ek saath: har line ek task)")
+
+# 📷 Photo upload — neeche (photo dekh ke SAIME jawab dega)
+photo = st.file_uploader("📷 Photo bhejo — SAIME dekh ke jawab dega",
+                         type=["jpg", "jpeg", "png", "webp"],
+                         key="photo_upload")
+if photo is not None:
+    _pkey = photo.name + "_" + str(photo.size)
+    if st.session_state.get("last_photo_key") != _pkey:
+        st.session_state.last_photo_key = _pkey
+        _bytes = photo.getvalue()
+        _pc1, _pc2 = st.columns([1, 2])
+        with _pc2:
+            st.image(_bytes, use_container_width=True)
+        st.session_state.messages.append(
+            {"role": "user", "content": "📷 Photo bheji", "photo": _bytes})
+        st.markdown("<div class='wa-typing'>👀 Photo dekh raha hoon...</div>",
+                    unsafe_allow_html=True)
+        caption, err = describe_photo(_bytes)
+        if caption:
+            st.session_state.photo_caption = caption
+            _ans = "Photo me ye dikh raha hai: " + caption + ". Is photo ke baare me kuch bhi poochho!"
+            wa_bubble(_ans, "ai", None, "chat")
+            st.session_state.messages.append(
+                {"role": "assistant", "content": _ans, "agent": "chat"})
+            st.session_state.last_audio = speak(_ans)
+        elif err == "no_token":
+            _ans = ("Photo mil gayi! 📷 Lekin photo padhne ke liye Streamlit me "
+                    "HF_TOKEN add karna hoga (App settings → Secrets → "
+                    "HF_TOKEN = tumhara Hugging Face token). Tab SAIME photo "
+                    "dekh ke sare jawab dega!")
+            wa_bubble(_ans, "ai", None, "chat")
+            st.session_state.messages.append(
+                {"role": "assistant", "content": _ans, "agent": "chat"})
+        else:
+            _ans = ("Photo mil gayi! 📷 Lekin abhi photo padh nahi paya "
+                    "(server busy ho sakta hai). Dobara try karo!")
+            wa_bubble(_ans, "ai", None, "chat")
+            st.session_state.messages.append(
+                {"role": "assistant", "content": _ans, "agent": "chat"})
+        st.rerun()
+
 if prompt:
     st.session_state.messages.append({"role": "user", "content": prompt})
     wa_bubble(prompt, "user")
@@ -528,10 +607,15 @@ if prompt:
     forced = st.session_state.agent
     last_answer = ""
     for task in tasks:
+        # Photo ka context — agar photo bheji hai to SAIME use dekh ke jawab de
+        _task = task
+        if st.session_state.get("photo_caption"):
+            _task = ("Photo me ye hai: " + st.session_state.photo_caption
+                     + ". Sawal: " + task)
         st.markdown("<div class='wa-typing'>Agent kaam kar raha hai...</div>",
                     unsafe_allow_html=True)
         answer, source, agent_key, steps = run_agent(
-            task, st.session_state.messages[:-1], model, tok, forced)
+            _task, st.session_state.messages[:-1], model, tok, forced)
         wa_bubble(answer, "ai", source, agent_key)
         st.session_state.messages.append(
             {"role": "assistant", "content": answer, "source": source, "agent": agent_key})
