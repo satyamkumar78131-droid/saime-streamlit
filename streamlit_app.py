@@ -294,6 +294,15 @@ FAQ = {
     "alvida": "Alvida! Phir milenge!",
 }
 
+# Greeting wale sawal (Settings me "Greeting reply" off ho to ye FAQ se nahi,
+# model se jawab denge). Sirf greeting — pehchan (who are you) hamesha FAQ se.
+GREETING_KEYS = {"hello", "hlo", "hllo", "helo", "heloo", "helloo", "helllo",
+                 "hallo", "hy", "hyy", "hi", "hii", "hiii", "hey", "heyy",
+                 "heyyy", "namaste", "namaskar", "good morning", "good afternoon",
+                 "good evening", "ram ram", "salaam", "adaab", "how are you",
+                 "how are you?", "kaise ho", "kaise ho?", "kya haal hai",
+                 "kya haal hai?", "bye", "goodbye", "alvida"}
+
 FEWSHOT = ("Q: Who are you?\nA: I'm your Satya.\n"
            "Q: What is the capital of India?\nA: The capital of India is New Delhi.\n")
 
@@ -391,7 +400,13 @@ def save_learned_qa(question, answer):
 def ask_satya(message, history, model, tok):
     """Sawal ka jawab do — pura chat yaad rakh ke (jitna model ki memory me fit ho)."""
     clean_q = message.strip().lower()
-    if clean_q in FAQ:
+    # Greeting reply (Settings se on/off) — off ho to greeting bhi model se jawab de
+    _greet_on = True
+    try:
+        _greet_on = st.session_state.get("greet_on", True)
+    except Exception:
+        _greet_on = True
+    if clean_q in FAQ and not (_greet_on is False and clean_q in GREETING_KEYS):
         answer = FAQ[clean_q]
         save_learned_qa(message, answer)
         return answer, None
@@ -532,8 +547,14 @@ def run_team(task, history, model, tok, freq="low", time="less"):
     expr = None
 
     # Pehle FAQ — pehchan/greeting jaise sawal seedha Chat Agent se.
+    # Greeting reply off ho to greeting model se jawab dega (FAQ se nahi).
     clean = task.strip().lower()
-    if clean in FAQ:
+    _greet_on = True
+    try:
+        _greet_on = st.session_state.get("greet_on", True)
+    except Exception:
+        _greet_on = True
+    if clean in FAQ and not (_greet_on is False and clean in GREETING_KEYS):
         answer = FAQ[clean]
         save_learned_qa(task, answer)
         return answer, None, ["chat"], ["💬 Chat Agent: ye to mujhe pehle se pata hai!"]
@@ -647,8 +668,14 @@ def run_agent(task, history, model, tok, forced=None):
     """Ek task ko uske agent se karwao — tool use karke, steps ke saath.
     Returns (answer, source, agent_key, steps)."""
     # Pehle FAQ — pehchan/greeting jaise sawal seedha yahin se (koi agent nahi).
+    # Greeting reply off ho to greeting model se jawab dega (FAQ se nahi).
     clean = task.strip().lower()
-    if clean in FAQ:
+    _greet_on = True
+    try:
+        _greet_on = st.session_state.get("greet_on", True)
+    except Exception:
+        _greet_on = True
+    if clean in FAQ and not (_greet_on is False and clean in GREETING_KEYS):
         answer = FAQ[clean]
         save_learned_qa(task, answer)
         return answer, None, "chat", ["💬 Chat Agent: ye to mujhe pehle se pata hai!"]
@@ -903,11 +930,17 @@ def speak(text):
 # ---------- UI (WhatsApp jaisa — BILKUL SAAF) ----------
 # Main screen pe SIRF: header (logo + SAIME + online), chat bubbles,
 # message input, aur neeche-left ek chhota Info button.
-# Baaki SAB kuch Info popup ke andar hai — Frequency, Time, Photo upload.
-# Koi quality button, koi team line, koi agent label, koi source, koi audio
-# player screen pe nahi dikhega.
+# Baaki SAB kuch Info popup ke andar hai — Frequency, Time, Font,
+# Greeting reply, Photo upload.
+# Har AI jawab pe: "SAIME Responding" label, typing animation (live),
+# 🔊 speaker button, 📋 copy button, 👍 like button.
+# Background listening aur wake word web app me possible nahi hai
+# (browser mic sirf app khula ho tabhi chalta hai, background me nahi) —
+# isliye ye dono is version me nahi hain.
 
 import html as _html
+import time as _time
+import streamlit.components.v1 as _components
 
 model, tok, step = load_model()
 
@@ -917,6 +950,23 @@ if "freq" not in st.session_state:
     st.session_state.freq = "low"
 if "time" not in st.session_state:
     st.session_state.time = "less"
+if "greet_on" not in st.session_state:
+    st.session_state.greet_on = True
+if "font" not in st.session_state:
+    st.session_state.font = "Default"
+if "liked" not in st.session_state:
+    st.session_state.liked = set()
+if "play_idx" not in st.session_state:
+    st.session_state.play_idx = None
+
+# Font designs — Info popup se chuno, bubbles usi font me dikhenge
+FONTS = {
+    "Default": "inherit",
+    "Serif": "Georgia, 'Times New Roman', serif",
+    "Monospace": "'Courier New', monospace",
+    "Rounded": "'Trebuchet MS', Verdana, sans-serif",
+}
+_font_family = FONTS.get(st.session_state.font, "inherit")
 
 # Streamlit ka sara extra UI chhupao — badge, menu, header, toolbar, deploy
 # button, status widget — taaki sirf chat dikhe, koi ad/button na aaye.
@@ -930,14 +980,18 @@ header {visibility: hidden;}
 [data-testid="stDecoration"] {visibility: hidden;}
 [data-testid="stStatusWidget"] {visibility: hidden;}
 [data-testid="stAppViewContainer"] > .main {padding-top: 0;}
-/* WhatsApp jaisi bubbles — saaf, koi label nahi */
+/* WhatsApp jaisi bubbles */
 .wa-row { display: flex; margin: 6px 0; }
 .wa-row.user { justify-content: flex-end; }
 .wa-row.ai { justify-content: flex-start; }
-.wa-bubble { max-width: 78%; padding: 8px 12px; border-radius: 12px; line-height: 1.45; font-size: 15px; white-space: pre-wrap; word-wrap: break-word; }
+.wa-bubble { max-width: 78%; padding: 8px 12px; border-radius: 12px; line-height: 1.45; font-size: 15px; white-space: pre-wrap; word-wrap: break-word; font-family: """ + _font_family + """; }
 .wa-bubble.user { background: #005c4b; color: #e7ffdb; border-bottom-right-radius: 2px; }
 .wa-bubble.ai { background: #202c33; color: #e9edef; border-bottom-left-radius: 2px; }
+.wa-label { font-size: 11px; color: #8696a0; margin-bottom: 2px; }
+.wa-label.ai { color: #53bdeb; }
+.wa-label.user { text-align: right; }
 .wa-typing { color: #8696a0; font-style: italic; font-size: 14px; padding: 6px 4px; }
+.wa-thanks { font-size: 12px; color: #25d366; margin: 2px 0 6px 4px; }
 /* Info button — medium size, left side (mobile pe columns stack ho jate hain,
    isliye popover ki width CSS se fix karo) */
 div[data-testid="stPopover"] { width: 150px !important; }
@@ -957,31 +1011,94 @@ st.markdown("<div style='border-bottom:1px solid #2a2f32; margin: 2px 0 10px;'><
             unsafe_allow_html=True)
 
 
-def wa_bubble(text, who):
-    """WhatsApp jaisi bubble — saaf, koi label/source nahi."""
+def bubble_html(text, who):
+    """Bubble ka HTML banao — user pe 'You' label, AI pe 'SAIME Responding'."""
     safe = _html.escape(text)
-    st.markdown(
-        "<div class='wa-row " + who + "'><div class='wa-bubble " + who + "'>"
-        + safe + "</div></div>",
-        unsafe_allow_html=True,
-    )
+    if who == "user":
+        label = "<div class='wa-label user'>You</div>"
+    else:
+        label = "<div class='wa-label ai'>SAIME Responding</div>"
+    return ("<div class='wa-row " + who + "'><div style='max-width:78%;'>"
+            + label + "<div class='wa-bubble " + who + "'>" + safe
+            + "</div></div></div>")
 
 
-# Pichla chat dikhao — saaf WhatsApp bubbles (photo messages ke saath)
-for m in st.session_state.messages:
+def wa_bubble(text, who):
+    """WhatsApp jaisi bubble dikhao — label ke saath."""
+    st.markdown(bubble_html(text, who), unsafe_allow_html=True)
+
+
+def typewriter_bubble(answer):
+    """AI jawab ko typing animation se dikhao — shabd-dar-shabd,
+    jaise AI real time me type kar raha ho. Cursor (▍) dikhta hai."""
+    ph = st.empty()
+    words = answer.split(" ")
+    partial = ""
+    for w in words:
+        partial += w + " "
+        ph.markdown(bubble_html(partial.rstrip() + " ▍", "ai"),
+                    unsafe_allow_html=True)
+        _time.sleep(0.025)
+    ph.markdown(bubble_html(answer, "ai"), unsafe_allow_html=True)
+
+
+def copy_button(text, key):
+    """Chhota 📋 Copy button — click karne pe pura jawab clipboard me copy.
+    (Streamlit ka components HTML use karta hai — clipboard JS.)"""
+    _js = json.dumps(text)
+    _html_code = (
+        "<button onclick=\"navigator.clipboard.writeText(" + _js + ")"
+        ".then(()=>{this.innerText='✓ Copied';"
+        "setTimeout(()=>{this.innerText='📋 Copy';},1500);})\""
+        " style='background:transparent;border:1px solid #2a2f32;color:#8696a0;"
+        "border-radius:8px;padding:2px 8px;font-size:12px;cursor:pointer;'>"
+        "📋 Copy</button>")
+    _components.html(_html_code, height=32)
+
+
+def ai_actions(idx, text):
+    """Har AI jawab ke neeche: 🔊 speaker, 📋 copy, 👍 like buttons."""
+    _c1, _c2, _c3, _c4 = st.columns([1, 1, 1, 9])
+    with _c1:
+        if st.button("🔊", key="spk_" + str(idx), help="Sunno"):
+            st.session_state.play_idx = idx
+            st.rerun()
+    with _c2:
+        copy_button(text, "cpy_" + str(idx))
+    with _c3:
+        if st.button("👍", key="like_" + str(idx), help="Like"):
+            st.session_state.liked.add(idx)
+            st.rerun()
+    # Speaker dabane pe us jawab ki awaaz bajao (sirf tabhi, auto nahi)
+    if st.session_state.play_idx == idx:
+        _audio = speak(text)
+        if _audio:
+            st.audio(_audio, format="audio/mp3")
+    # Like karne pe friendly message
+    if idx in st.session_state.liked:
+        st.markdown("<div class='wa-thanks'>Thank you for your feedback, dude! 💚</div>",
+                    unsafe_allow_html=True)
+
+
+# Pichla chat dikhao — labels + action buttons ke saath
+for _i, m in enumerate(st.session_state.messages):
     if m.get("photo"):
         _pc1, _pc2 = st.columns([1, 2])
         with _pc2:
             st.image(m["photo"], use_container_width=True)
         if m.get("content"):
             wa_bubble(m["content"], m["role"])
+            if m["role"] == "assistant":
+                ai_actions(_i, m["content"])
     else:
         wa_bubble(m["content"], m["role"])
+        if m["role"] == "assistant":
+            ai_actions(_i, m["content"])
 
 prompt = st.chat_input("Message likho...")
 
 # ℹ️ Info button — neeche-left, medium size. Click karne pe chhota pop-up:
-# Frequency (Low/Medium/High) + Time (Less/Medium/High) + Photo upload.
+# Frequency + Time + Font + Greeting reply + Photo upload.
 _info_l, _info_r = st.columns([1, 4])
 with _info_l:
     with st.popover("ℹ️ Info", use_container_width=True):
@@ -1006,6 +1123,23 @@ with _info_l:
         st.session_state.time = _time.lower()
         st.caption("Less: ~1 second. Medium: ~3 seconds. "
                    "High: 3–5 seconds, sabse powerful jawab.")
+        st.markdown("**Font**")
+        _font = st.selectbox(
+            "Font",
+            ["Default", "Serif", "Monospace", "Rounded"],
+            index=["Default", "Serif", "Monospace", "Rounded"].index(
+                st.session_state.font),
+            label_visibility="collapsed", key="font_sel")
+        if _font != st.session_state.font:
+            st.session_state.font = _font
+            st.rerun()
+        st.markdown("**Greeting reply**")
+        _greet = st.checkbox(
+            "👋 Greeting pe jawab do",
+            value=st.session_state.greet_on, key="greet_chk")
+        st.session_state.greet_on = _greet
+        st.caption("Off ho to 'hello'/'hlo' pe bhi model se jawab aayega, "
+                   "ready-made greeting nahi.")
         st.markdown("**Photo**")
         _photo = st.file_uploader(
             "📷 Photo bhejo — SAIME dekh ke jawab dega",
@@ -1038,9 +1172,8 @@ if prompt:
     st.session_state.messages.append({"role": "user", "content": prompt})
     wa_bubble(prompt, "user")
     save_idea(prompt)
-    # Translation (all-rounder): user ki language pehchano.
-    # Hindi/English nahi hai to sawal English me translate karke jawab do,
-    # phir jawab wapas user ki language me translate karo.
+    # Translation (all-rounder): user ki language pehchano — AI usi language
+    # me jawab dega (Hindi, English, Spanish, French...). Ye pehle se built hai.
     _lang = detect_language(prompt)
     _needs_translate = _lang not in ("hi", "en")
     _prompt_en = prompt
@@ -1055,8 +1188,9 @@ if prompt:
         if st.session_state.get("photo_caption"):
             _task = ("Photo me ye hai: " + st.session_state.photo_caption
                      + ". Sawal: " + task)
-        st.markdown("<div class='wa-typing'>Typing...</div>",
-                    unsafe_allow_html=True)
+        _typing = st.empty()
+        _typing.markdown("<div class='wa-typing'>Typing...</div>",
+                         unsafe_allow_html=True)
         # TEAM: ek kaam ko kai agents mil ke solve karein
         # (Frequency + Time — Info popup se)
         answer, source, team, steps = run_team(
@@ -1068,7 +1202,9 @@ if prompt:
             _tr_ans, _ = translate_text(answer, _lang)
             if _tr_ans:
                 answer = _tr_ans
-        wa_bubble(answer, "ai")
+        _typing.empty()
+        # Typing animation se jawab dikhao — jaise AI real time me likh raha ho
+        typewriter_bubble(answer)
         st.session_state.messages.append(
             {"role": "assistant", "content": answer})
     st.rerun()
