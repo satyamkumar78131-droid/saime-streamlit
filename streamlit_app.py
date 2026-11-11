@@ -225,9 +225,21 @@ def web_search_all(question):
 
 FAQ = {
     "hello": "Hello! Main SAIME hoon. Tumhara sawal poochho, main jawab dunga!",
+    "hlo": "Hello! Main SAIME hoon. Tumhara sawal poochho, main jawab dunga!",
+    "hllo": "Hello! Main SAIME hoon. Tumhara sawal poochho, main jawab dunga!",
+    "helo": "Hello! Main SAIME hoon. Tumhara sawal poochho, main jawab dunga!",
+    "heloo": "Hello! Main SAIME hoon. Tumhara sawal poochho, main jawab dunga!",
+    "helloo": "Hello! Main SAIME hoon. Tumhara sawal poochho, main jawab dunga!",
+    "helllo": "Hello! Main SAIME hoon. Tumhara sawal poochho, main jawab dunga!",
+    "hallo": "Hello! Main SAIME hoon. Tumhara sawal poochho, main jawab dunga!",
+    "hy": "Hi! Main SAIME hoon. Kya poochhna hai?",
+    "hyy": "Hi! Main SAIME hoon. Kya poochhna hai?",
     "hi": "Hi! Main SAIME hoon. Kya poochhna hai?",
     "hii": "Hii! Main SAIME hoon. Kya poochhna hai?",
+    "hiii": "Hii! Main SAIME hoon. Kya poochhna hai?",
     "hey": "Hey! Main SAIME hoon. Kya poochhna hai?",
+    "heyy": "Hey! Main SAIME hoon. Kya poochhna hai?",
+    "heyyy": "Hey! Main SAIME hoon. Kya poochhna hai?",
     "namaste": "Namaste! Main SAIME hoon. Kya poochhna hai?",
     "namaskar": "Namaskar! Main SAIME hoon. Kya poochhna hai?",
     "who are you": "I'm your Satya.",
@@ -268,9 +280,15 @@ FACT_WORDS = ["what", "where", "when", "who", "whom", "whose", "which", "how", "
 
 
 def is_gibberish(text):
-    """Model ka jawab bakwas hai ya nahi — repetitive nonsense ya banawati words."""
+    """Model ka jawab bakwas hai ya nahi — repetitive nonsense ya banawati words.
+    Naya check: agar aadhe se zyada shabd pehchane hue nahi (jaise 'likegs',
+    'danthes', 'pliketh'), to jawab bakwas hai — chahe usme 'how', 'many'
+    jaise 1-2 sahi shabd hon."""
     words = re.findall(r"[a-zA-Z\u0900-\u097F]+", text.lower())
     if len(words) < 2:
+        # Sirf number wala jawab (jaise "2+3 = 5") bakwas nahi hai
+        if re.search(r"\d", text):
+            return False
         return True
     if len(set(words)) / len(words) < 0.5:
         return True
@@ -287,6 +305,36 @@ def is_gibberish(text):
               "kahan", "kaise", "hoon", "ho", "hain", "tha", "thi", "nahi", "aur",
               "bhi", "sabse", "bada", "chhota", "paani", "degree", "par", "kuch"}
     if not any(w in common for w in words):
+        return True
+    # Known-words ratio: aam English/Hindi shabd + mashhoor naam
+    known = common | {
+        "new", "delhi", "mumbai", "kolkata", "chennai", "bangalore", "jaipur",
+        "london", "america", "china", "japan", "russia", "germany", "england",
+        "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
+        "ten", "first", "second", "third", "many", "much", "more", "most",
+        "few", "some", "any", "all", "every", "each", "other", "another",
+        "good", "bad", "big", "small", "great", "best", "better", "new",
+        "old", "young", "hot", "cold", "fast", "slow", "high", "low", "long",
+        "short", "right", "wrong", "true", "false", "yes", "no", "not", "very",
+        "just", "only", "also", "well", "now", "then", "here", "there", "today",
+        "tomorrow", "yesterday", "year", "month", "week", "day", "night",
+        "morning", "evening", "time", "people", "man", "woman", "boy", "girl",
+        "child", "friend", "family", "school", "book", "water", "food", "house",
+        "car", "dog", "cat", "bird", "fish", "tree", "flower", "sun", "moon",
+        "star", "sky", "earth", "world", "country", "language", "number",
+        "question", "answer", "story", "poem", "song", "game", "play", "work",
+        "go", "come", "see", "know", "think", "say", "tell", "give", "take",
+        "make", "find", "like", "love", "want", "need", "help", "try", "use",
+        "write", "read", "speak", "listen", "watch", "eat", "drink", "sleep",
+        "run", "walk", "sit", "stand", "open", "close", "start", "stop",
+        "bharat", "hindustan", "dilli", "paisa", "rupay", "sawal", "jawab",
+        "kahani", "kavita", "geet", " dost", "duniya", "desh", "bhasha",
+        "samay", "din", "raat", "subah", "shaam", "saal", "mahina", "hafta",
+        "accha", "bura", "sahi", "galat", "pehla", "dusra", "teesra",
+        "ek", "do", "teen", "chaar", "paanch", "chhe", "saat", "aath",
+        "nau", "das", "sau", "hazaar", "lakh", "crore"}
+    known_count = sum(1 for w in words if w in known)
+    if known_count / len(words) < 0.5:
         return True
     return False
 
