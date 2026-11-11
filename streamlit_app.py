@@ -34,7 +34,7 @@ CHECKPOINT_NAME = "step-22000.pt"
 TEMPERATURE = 0.7
 MAX_NEW_TOKENS = 40  # quick answer — chhota aur tez jawab
 
-st.set_page_config(page_title="SAIME", page_icon="💜", layout="centered")
+st.set_page_config(page_title="SAIME", page_icon="saime-logo.png", layout="centered")
 
 # Streamlit ka footer/menu chhupao — "Hosted with Streamlit" badge, menu aur
 # upar wala bar na dikhe, app bilkul apna lage.
@@ -303,29 +303,69 @@ def speak(text):
         return None
 
 
-# ---------- UI ----------
-
-st.title("💜 SAIME")
-st.caption("Tumhara khud ka personal AI — SATYA V1 model (49.6M params, Hindi + English + Hinglish). Sawal poochho, main jawab dunga!")
+# ---------- UI (ChatGPT jaisa) ----------
 
 model, tok, step = load_model()
-st.success(f"✅ SAIME online hai! (Model step {step}, 49.6M params)")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "last_audio" not in st.session_state:
     st.session_state.last_audio = None
 
-# Suggestion chips
-cols = st.columns(3)
-suggestions = ["Who are you?", "Tum kaun ho?", "What is the capital of India?"]
-for col, sugg in zip(cols, suggestions):
-    if col.button(sugg, use_container_width=True):
-        st.session_state.pending = sugg
+# Sidebar — ChatGPT jaisa (New chat + history + model info)
+with st.sidebar:
+    st.image("saime-logo.png", width=56)
+    st.markdown("## SAIME")
+    if st.button("＋ New chat", use_container_width=True):
+        st.session_state.messages = []
+        st.session_state.last_audio = None
+        st.rerun()
+    st.markdown("---")
+    st.markdown("**Chats**")
+    seen = []
+    for m in st.session_state.messages:
+        if m["role"] == "user" and m["content"] not in seen:
+            seen.append(m["content"])
+    if seen:
+        for q in seen[-10:]:
+            if st.button("💬 " + (q[:28] + "…" if len(q) > 28 else q),
+                         key="hist_" + str(hash(q)), use_container_width=True):
+                st.session_state.pending = q
+    else:
+        st.caption("Abhi koi chat nahi hai.")
+    st.markdown("---")
+    st.caption(f"● Online — SATYA V1 (step {step}, 49.6M params)")
+    st.caption("Hindi + English + Hinglish")
 
-# Pichla chat dikhao
+# Upar — ChatGPT jaisa model naam
+st.markdown("<div style='text-align:center; font-size:19px; font-weight:700; padding:6px 0 2px;'>SAIME</div>",
+            unsafe_allow_html=True)
+st.markdown("<div style='text-align:center; font-size:12px; color:gray; padding-bottom:10px;'>Tumhara apna AI — SATYA V1</div>",
+            unsafe_allow_html=True)
+
+# Welcome screen — ChatGPT jaisa (khali chat me beech me greeting + suggestion cards)
+if not st.session_state.messages:
+    _l, _c, _r = st.columns([1, 1, 1])
+    with _c:
+        st.image("saime-logo.png", width=88)
+    st.markdown("<div style='text-align:center; font-size:26px; font-weight:700; padding:8px 0 24px;'>How can I help you?</div>",
+                unsafe_allow_html=True)
+    # Suggestion cards — 2x2 grid, ChatGPT jaisa
+    suggestions = ["Who are you?", "Tum kaun ho?",
+                   "What is the capital of India?", "5 + 3 kitna hota hai?"]
+    for row in range(0, 4, 2):
+        cols = st.columns(2)
+        for col, sugg in zip(cols, suggestions[row:row + 2]):
+            if col.button(sugg, use_container_width=True, key="sugg_" + sugg):
+                st.session_state.pending = sugg
+
+# SAIME logo — assistant avatar ke liye (GitHub raw URL, app me image avatar)
+LOGO_URL = "https://raw.githubusercontent.com/satyamkumar78131-droid/saime-streamlit/main/saime-logo.png"
+
+# Pichla chat dikhao — avatar ke saath, ChatGPT jaisa
 for m in st.session_state.messages:
-    with st.chat_message(m["role"]):
+    avatar = "👤" if m["role"] == "user" else LOGO_URL
+    with st.chat_message(m["role"], avatar=avatar):
         st.markdown(m["content"])
         if m.get("source"):
             st.caption(f"🔎 Source: {m['source']}")
@@ -334,17 +374,17 @@ for m in st.session_state.messages:
 if st.session_state.last_audio:
     st.audio(st.session_state.last_audio, format="audio/mp3")
 
-prompt = st.chat_input("Sawal likho... (Who are you? / Tum kaun ho? / What is the capital of India?)")
+prompt = st.chat_input("Sawal likho...")
 if "pending" in st.session_state and st.session_state.pending:
     prompt = st.session_state.pending
     st.session_state.pending = None
 
 if prompt:
     st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
+    with st.chat_message("user", avatar="👤"):
         st.markdown(prompt)
     save_idea(prompt)
-    with st.chat_message("assistant"):
+    with st.chat_message("assistant", avatar=LOGO_URL):
         with st.spinner("Soch raha hoon..."):
             answer, source = ask_satya(prompt, st.session_state.messages[:-1], model, tok)
         st.markdown(answer)
