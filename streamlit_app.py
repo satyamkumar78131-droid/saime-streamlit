@@ -1044,15 +1044,24 @@ def typewriter_bubble(answer):
 
 def copy_button(text, key):
     """Chhota 📋 Copy button — click karne pe pura jawab clipboard me copy.
-    (Streamlit ka components HTML use karta hai — clipboard JS.)"""
-    _js = json.dumps(text)
+    (Streamlit ka components HTML use karta hai — clipboard JS.)
+    FIX: pehle onclick="..." ke andar JSON string daala tha — usme jo
+    double-quote aata tha wo attribute ko tod deta tha aur JS text screen
+    pe dikhne lagta tha. Ab button + alag <script> me event listener hai,
+    koi quote-tod nahi."""
+    _js = json.dumps(text).replace("</", "<\\/")
+    _bid = "cpy_" + str(key)
     _html_code = (
-        "<button onclick=\"navigator.clipboard.writeText(" + _js + ")"
-        ".then(()=>{this.innerText='✓ Copied';"
-        "setTimeout(()=>{this.innerText='📋 Copy';},1500);})\""
-        " style='background:transparent;border:1px solid #2a2f32;color:#8696a0;"
-        "border-radius:8px;padding:2px 8px;font-size:12px;cursor:pointer;'>"
-        "📋 Copy</button>")
+        "<button id='" + _bid + "' style='background:transparent;"
+        "border:1px solid #2a2f32;color:#8696a0;border-radius:8px;"
+        "padding:2px 8px;font-size:12px;cursor:pointer;'>📋 Copy</button>"
+        "<script>"
+        "document.getElementById('" + _bid + "').addEventListener('click', function(){"
+        "var b=this;"
+        "navigator.clipboard.writeText(" + _js + ").then(function(){"
+        "b.innerText='✓ Copied';"
+        "setTimeout(function(){b.innerText='📋 Copy';},1500);});});"
+        "</script>")
     _components.html(_html_code, height=32)
 
 
