@@ -224,24 +224,24 @@ def web_search_all(question):
 
 
 FAQ = {
-    "hello": "Hello! Main SAIME hoon. Tumhara sawal poochho, main jawab dunga!",
-    "hlo": "Hello! Main SAIME hoon. Tumhara sawal poochho, main jawab dunga!",
-    "hllo": "Hello! Main SAIME hoon. Tumhara sawal poochho, main jawab dunga!",
-    "helo": "Hello! Main SAIME hoon. Tumhara sawal poochho, main jawab dunga!",
-    "heloo": "Hello! Main SAIME hoon. Tumhara sawal poochho, main jawab dunga!",
-    "helloo": "Hello! Main SAIME hoon. Tumhara sawal poochho, main jawab dunga!",
-    "helllo": "Hello! Main SAIME hoon. Tumhara sawal poochho, main jawab dunga!",
-    "hallo": "Hello! Main SAIME hoon. Tumhara sawal poochho, main jawab dunga!",
-    "hy": "Hi! Main SAIME hoon. Kya poochhna hai?",
-    "hyy": "Hi! Main SAIME hoon. Kya poochhna hai?",
-    "hi": "Hi! Main SAIME hoon. Kya poochhna hai?",
-    "hii": "Hii! Main SAIME hoon. Kya poochhna hai?",
-    "hiii": "Hii! Main SAIME hoon. Kya poochhna hai?",
-    "hey": "Hey! Main SAIME hoon. Kya poochhna hai?",
-    "heyy": "Hey! Main SAIME hoon. Kya poochhna hai?",
-    "heyyy": "Hey! Main SAIME hoon. Kya poochhna hai?",
-    "namaste": "Namaste! Main SAIME hoon. Kya poochhna hai?",
-    "namaskar": "Namaskar! Main SAIME hoon. Kya poochhna hai?",
+    "hello": "Hello! Main Satya hoon. Tumhara sawal poochho, main jawab dunga!",
+    "hlo": "Hello! Main Satya hoon. Tumhara sawal poochho, main jawab dunga!",
+    "hllo": "Hello! Main Satya hoon. Tumhara sawal poochho, main jawab dunga!",
+    "helo": "Hello! Main Satya hoon. Tumhara sawal poochho, main jawab dunga!",
+    "heloo": "Hello! Main Satya hoon. Tumhara sawal poochho, main jawab dunga!",
+    "helloo": "Hello! Main Satya hoon. Tumhara sawal poochho, main jawab dunga!",
+    "helllo": "Hello! Main Satya hoon. Tumhara sawal poochho, main jawab dunga!",
+    "hallo": "Hello! Main Satya hoon. Tumhara sawal poochho, main jawab dunga!",
+    "hy": "Hi! Main Satya hoon. Kya poochhna hai?",
+    "hyy": "Hi! Main Satya hoon. Kya poochhna hai?",
+    "hi": "Hi! Main Satya hoon. Kya poochhna hai?",
+    "hii": "Hii! Main Satya hoon. Kya poochhna hai?",
+    "hiii": "Hii! Main Satya hoon. Kya poochhna hai?",
+    "hey": "Hey! Main Satya hoon. Kya poochhna hai?",
+    "heyy": "Hey! Main Satya hoon. Kya poochhna hai?",
+    "heyyy": "Hey! Main Satya hoon. Kya poochhna hai?",
+    "namaste": "Namaste! Main Satya hoon. Kya poochhna hai?",
+    "namaskar": "Namaskar! Main Satya hoon. Kya poochhna hai?",
     "who are you": "I'm your Satya.",
     "who are you?": "I'm your Satya.",
     "tum kaun ho": "Main tumhara Satya hoon.",
@@ -486,13 +486,18 @@ AGENT_INFO = {
 }
 
 
-def run_team(task, history, model, tok, mode="low"):
+def run_team(task, history, model, tok, freq="low", time="less"):
     """Ek kaam ko MULTIPLE agents MIL KE solve karein — team work.
     🔎 Search Agent facts dhoondhta hai, 🧮 Math Agent hisaab karta hai,
     💬 Chat Agent jawab banata hai, ✍️ Writer Agent use saaf likhta hai.
-    mode: 'low' = sirf model (fast, default), 'medium' = model + web check
-    (sabse accurate), 'hard' = SABHI sources jod ke ek complete jawab.
+    freq (Frequency): low = model + trained Q&A, medium = + web sources,
+    high = sabhi sources + Gemini verify (poora process hidden).
+    time (Time): less = fast (~1s), medium = ~3s, high = 3-5s, sabse powerful.
+    Dono me se jo zyada thorough ho, wahi level chalta hai.
     Returns (final_answer, source, team_list, steps)."""
+    _lvl = {"low": 1, "medium": 2, "high": 3}
+    _tlvl = {"less": 1, "medium": 2, "high": 3}
+    level = max(_lvl.get(freq, 1), _tlvl.get(time, 1))
     team = []
     steps = []
     facts = None
@@ -507,8 +512,8 @@ def run_team(task, history, model, tok, mode="low"):
         save_learned_qa(task, answer)
         return answer, None, ["chat"], ["💬 Chat Agent: ye to mujhe pehle se pata hai!"]
 
-    # LOW mode — sirf model, fast default (koi web search nahi)
-    if mode == "low":
+    # Level 1 — sirf model (fast, ~1s)
+    if level == 1:
         team.append("chat")
         steps.append("💬 Chat Agent: fast jawab de raha hoon...")
         expr = detect_math(task)
@@ -533,14 +538,14 @@ def run_team(task, history, model, tok, mode="low"):
     _words = set(re.findall(r"[a-zA-Z\u0900-\u097F]+", low))
     if (_words & set(FACT_WORDS)) or "?" in task:
         team.append("search")
-        if mode == "hard":
+        if level >= 3:
             steps.append("🔎 Search Agent: SABHI sources se dhoondh raha hoon...")
             all_src = web_search_all(task)
             if all_src:
                 facts = all_src[0][0]
                 source = ", ".join(s for _, s in all_src)
                 steps.append("🔎 Search Agent: " + str(len(all_src)) + " sources mil gaye!")
-                # HARD: sabhi sources + model ka jawab jod ke ek complete jawab
+                # Level 3: sabhi sources + model ka jawab jod ke ek complete jawab
                 _model_ans, _ = ask_satya(task, history, model, tok)
                 _parts = [a for a, _ in all_src]
                 if _model_ans and not is_gibberish(_model_ans):
@@ -554,6 +559,10 @@ def run_team(task, history, model, tok, mode="low"):
                         _seen.add(_k)
                         _uniq.append(_p)
                 answer = "\n\n".join(_uniq)
+                # Gemini se chup-chap verify karo (High) — screen pe kuch nahi
+                _verified = verify_with_gemini(task, answer)
+                if _verified:
+                    answer = _verified
                 save_learned_qa(task, answer)
                 if "chat" not in team:
                     team.append("chat")
@@ -595,6 +604,11 @@ def run_team(task, history, model, tok, mode="low"):
             history, model, tok)
         if polished and not is_gibberish(polished) and len(polished) > 10:
             answer = polished
+    # Level 3: Gemini se chup-chap verify karo — screen pe kuch nahi
+    if level >= 3:
+        _verified = verify_with_gemini(task, answer)
+        if _verified:
+            answer = _verified
     save_learned_qa(task, answer)
     return answer, source, team, steps
 
@@ -677,6 +691,46 @@ def describe_photo(image_bytes):
         return None, "api_error"
 
 
+def verify_with_gemini(question, answer):
+    """High mode: jawab ko Gemini se chup-chap verify karo.
+    Poora process hidden rehta hai — screen pe kuch nahi dikhta.
+    Key Streamlit secrets se (GEMINI_API_KEY, free: aistudio.google.com).
+    Bina key ke None — tab multi-source jawab hi final hota hai.
+    Returns (verified_answer ya None)."""
+    try:
+        key = None
+        try:
+            key = st.secrets.get("GEMINI_API_KEY")
+        except Exception:
+            key = None
+        if not key:
+            return None
+        prompt = ("Check this answer for the question and correct it if wrong. "
+                  "Give ONLY the final correct answer, in the same language as the question.\n"
+                  "Question: " + question + "\nAnswer: " + answer)
+        body = json.dumps({
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"temperature": 0.2, "maxOutputTokens": 300},
+        }).encode("utf-8")
+        url = ("https://generativelanguage.googleapis.com/v1beta/models/"
+               "gemini-2.0-flash:generateContent?key=" + key)
+        req = urllib.request.Request(
+            url, data=body,
+            headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req, timeout=30) as r:
+            data = json.loads(r.read().decode("utf-8"))
+        cands = data.get("candidates") or []
+        if cands:
+            parts = cands[0].get("content", {}).get("parts") or []
+            text = "".join(p.get("text", "") for p in parts).strip()
+            if text:
+                return text
+        return None
+    except Exception as e:
+        print("Gemini verify error:", e)
+        return None
+
+
 def speak(text):
     """Jawab ko awaaz me badlo (gTTS) — audio bytes wapas karo."""
     try:
@@ -693,9 +747,12 @@ def speak(text):
         return None
 
 
-# ---------- UI (WhatsApp jaisa) ----------
-# Pehle ekdam khali — na title, na banner, na suggestion, na sidebar.
-# User puche to uska message RIGHT (green bubble), AI ka jawab LEFT (grey bubble).
+# ---------- UI (WhatsApp jaisa — BILKUL SAAF) ----------
+# Main screen pe SIRF: header (logo + SAIME + online), chat bubbles,
+# message input, aur neeche-left ek chhota Info button.
+# Baaki SAB kuch Info popup ke andar hai — Frequency, Time, Photo upload.
+# Koi quality button, koi team line, koi agent label, koi source, koi audio
+# player screen pe nahi dikhega.
 
 import html as _html
 
@@ -703,8 +760,10 @@ model, tok, step = load_model()
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
-if "last_audio" not in st.session_state:
-    st.session_state.last_audio = None
+if "freq" not in st.session_state:
+    st.session_state.freq = "low"
+if "time" not in st.session_state:
+    st.session_state.time = "less"
 
 # Streamlit ka sara extra UI chhupao — badge, menu, header, toolbar, deploy
 # button, status widget — taaki sirf chat dikhe, koi ad/button na aaye.
@@ -718,19 +777,13 @@ header {visibility: hidden;}
 [data-testid="stDecoration"] {visibility: hidden;}
 [data-testid="stStatusWidget"] {visibility: hidden;}
 [data-testid="stAppViewContainer"] > .main {padding-top: 0;}
-/* WhatsApp jaisa chat header */
-.wa-header { display: flex; align-items: center; gap: 10px; padding: 8px 4px 10px; border-bottom: 1px solid #2a2f32; margin-bottom: 8px; }
-.wa-header img { width: 40px; height: 40px; border-radius: 50%; }
-.wa-header .name { font-size: 17px; font-weight: 700; line-height: 1.2; }
-.wa-header .status { font-size: 12px; color: #8696a0; line-height: 1.2; }
-/* WhatsApp jaisi bubbles */
+/* WhatsApp jaisi bubbles — saaf, koi label nahi */
 .wa-row { display: flex; margin: 6px 0; }
 .wa-row.user { justify-content: flex-end; }
 .wa-row.ai { justify-content: flex-start; }
 .wa-bubble { max-width: 78%; padding: 8px 12px; border-radius: 12px; line-height: 1.45; font-size: 15px; white-space: pre-wrap; word-wrap: break-word; }
 .wa-bubble.user { background: #005c4b; color: #e7ffdb; border-bottom-right-radius: 2px; }
 .wa-bubble.ai { background: #202c33; color: #e9edef; border-bottom-left-radius: 2px; }
-.wa-bubble .src { display: block; font-size: 11px; color: #8696a0; margin-top: 4px; }
 .wa-typing { color: #8696a0; font-style: italic; font-size: 14px; padding: 6px 4px; }
 </style>
 """, unsafe_allow_html=True)
@@ -746,133 +799,104 @@ with _hdr_r:
 st.markdown("<div style='border-bottom:1px solid #2a2f32; margin: 2px 0 10px;'></div>",
             unsafe_allow_html=True)
 
-# Multi-Agent Team — har kaam ko KAI agents mil ke solve karte hain
-st.markdown("<div style='text-align:center; font-size:13px; color:#8696a0; "
-            "padding:2px 0 10px;'>🤖 Multi-Agent Team: 🔎 Search + 🧮 Math + "
-            "💬 Chat + ✍️ Writer — ek saath ek kaam</div>",
-            unsafe_allow_html=True)
 
-
-def wa_bubble(text, who, source=None, team=None):
-    """WhatsApp jaisi bubble dikhao — user RIGHT green, AI LEFT grey.
-    AI bubble me upar TEAM dikhao (kaun-kaun se agents ne kaam kiya)."""
+def wa_bubble(text, who):
+    """WhatsApp jaisi bubble — saaf, koi label/source nahi."""
     safe = _html.escape(text)
-    head = ""
-    if team and isinstance(team, list) and team:
-        _names = " + ".join(AGENT_INFO[t][0] + " " + AGENT_INFO[t][1]
-                            for t in team if t in AGENT_INFO)
-        head = ("<span style='display:block; font-size:11px; color:#53bdeb; "
-                "font-weight:700; margin-bottom:2px;'>" + _names + "</span>")
-    elif team and isinstance(team, str) and team in AGENT_INFO:
-        _emoji, _name = AGENT_INFO[team]
-        head = ("<span style='display:block; font-size:11px; color:#53bdeb; "
-                "font-weight:700; margin-bottom:2px;'>" + _emoji + " " + _name + "</span>")
-    src_html = ""
-    if source:
-        src_html = "<span class='src'>🔎 Source: " + _html.escape(str(source)) + "</span>"
     st.markdown(
         "<div class='wa-row " + who + "'><div class='wa-bubble " + who + "'>"
-        + head + safe + src_html + "</div></div>",
+        + safe + "</div></div>",
         unsafe_allow_html=True,
     )
 
 
-# Pichla chat dikhao — WhatsApp bubbles (photo messages ke saath)
+# Pichla chat dikhao — saaf WhatsApp bubbles (photo messages ke saath)
 for m in st.session_state.messages:
     if m.get("photo"):
         _pc1, _pc2 = st.columns([1, 2])
         with _pc2:
             st.image(m["photo"], use_container_width=True)
         if m.get("content"):
-            wa_bubble(m["content"], m["role"], m.get("source"), m.get("team", m.get("agent")))
+            wa_bubble(m["content"], m["role"])
     else:
-        wa_bubble(m["content"], m["role"], m.get("source"), m.get("team", m.get("agent")))
+        wa_bubble(m["content"], m["role"])
 
-# Voice (aakhri jawab ki)
-if st.session_state.last_audio:
-    st.audio(st.session_state.last_audio, format="audio/mp3")
+prompt = st.chat_input("Message likho...")
 
-prompt = st.chat_input("Message likho... (kai task ek saath: har line ek task)")
-
-# Jawab ki quality — neeche option (Low = fast default, Medium = sabse accurate,
-# Hard = sabhi sources jod ke complete jawab)
-if "quality" not in st.session_state:
-    st.session_state.quality = "low"
-_q1, _q2, _q3 = st.columns(3)
-if _q1.button("🟢 Low — Fast", key="q_low", use_container_width=True,
-              type="primary" if st.session_state.quality == "low" else "secondary"):
-    st.session_state.quality = "low"
-    st.rerun()
-if _q2.button("🟡 Medium — Accurate", key="q_med", use_container_width=True,
-              type="primary" if st.session_state.quality == "medium" else "secondary"):
-    st.session_state.quality = "medium"
-    st.rerun()
-if _q3.button("🔴 Hard — Complete", key="q_hard", use_container_width=True,
-              type="primary" if st.session_state.quality == "hard" else "secondary"):
-    st.session_state.quality = "hard"
-    st.rerun()
-
-# 📷 Photo upload — neeche (photo dekh ke SAIME jawab dega)
-photo = st.file_uploader("📷 Photo bhejo — SAIME dekh ke jawab dega",
-                         type=["jpg", "jpeg", "png", "webp"],
-                         key="photo_upload")
-if photo is not None:
-    _pkey = photo.name + "_" + str(photo.size)
-    if st.session_state.get("last_photo_key") != _pkey:
-        st.session_state.last_photo_key = _pkey
-        _bytes = photo.getvalue()
-        _pc1, _pc2 = st.columns([1, 2])
-        with _pc2:
-            st.image(_bytes, use_container_width=True)
-        st.session_state.messages.append(
-            {"role": "user", "content": "📷 Photo bheji", "photo": _bytes})
-        st.markdown("<div class='wa-typing'>👀 Photo dekh raha hoon...</div>",
-                    unsafe_allow_html=True)
-        caption, err = describe_photo(_bytes)
-        if caption:
-            st.session_state.photo_caption = caption
-            _ans = "Photo me ye dikh raha hai: " + caption + ". Is photo ke baare me kuch bhi poochho!"
-            wa_bubble(_ans, "ai", None, "chat")
-            st.session_state.messages.append(
-                {"role": "assistant", "content": _ans, "team": ["chat"]})
-            st.session_state.last_audio = speak(_ans)
-        elif err == "no_token":
-            _ans = ("Photo mil gayi! 📷 Lekin photo padhne ke liye Streamlit me "
-                    "HF_TOKEN add karna hoga (App settings → Secrets → "
-                    "HF_TOKEN = tumhara Hugging Face token). Tab SAIME photo "
-                    "dekh ke sare jawab dega!")
-            wa_bubble(_ans, "ai", None, "chat")
-            st.session_state.messages.append(
-                {"role": "assistant", "content": _ans, "team": ["chat"]})
-        else:
-            _ans = ("Photo mil gayi! 📷 Lekin abhi photo padh nahi paya "
-                    "(server busy ho sakta hai). Dobara try karo!")
-            wa_bubble(_ans, "ai", None, "chat")
-            st.session_state.messages.append(
-                {"role": "assistant", "content": _ans, "team": ["chat"]})
-        st.rerun()
+# ℹ️ Info button — neeche-left, medium size. Click karne pe chhota pop-up:
+# Frequency (Low/Medium/High) + Time (Less/Medium/High) + Photo upload.
+_info_l, _info_r = st.columns([1, 4])
+with _info_l:
+    with st.popover("ℹ️ Info", use_container_width=True):
+        st.markdown("**Frequency**")
+        _freq = st.radio(
+            "Frequency",
+            ["Low", "Medium", "High"],
+            index=["low", "medium", "high"].index(st.session_state.freq),
+            horizontal=True, label_visibility="collapsed",
+            key="freq_radio")
+        st.session_state.freq = _freq.lower()
+        st.caption("Low: sources + trained Q&A se meaningful jawab. "
+                   "Medium: kai sources se accurate jawab + related info. "
+                   "High: sabhi sources jod ke + Gemini verify (hidden).")
+        st.markdown("**Time**")
+        _time = st.radio(
+            "Time",
+            ["Less", "Medium", "High"],
+            index=["less", "medium", "high"].index(st.session_state.time),
+            horizontal=True, label_visibility="collapsed",
+            key="time_radio")
+        st.session_state.time = _time.lower()
+        st.caption("Less: ~1 second. Medium: ~3 seconds. "
+                   "High: 3–5 seconds, sabse powerful jawab.")
+        st.markdown("**Photo**")
+        _photo = st.file_uploader(
+            "📷 Photo bhejo — SAIME dekh ke jawab dega",
+            type=["jpg", "jpeg", "png", "webp"],
+            key="photo_upload")
+        if _photo is not None:
+            _pkey = _photo.name + "_" + str(_photo.size)
+            if st.session_state.get("last_photo_key") != _pkey:
+                st.session_state.last_photo_key = _pkey
+                _bytes = _photo.getvalue()
+                st.session_state.messages.append(
+                    {"role": "user", "content": "📷 Photo bheji", "photo": _bytes})
+                caption, err = describe_photo(_bytes)
+                if caption:
+                    st.session_state.photo_caption = caption
+                    _ans = ("Photo me ye dikh raha hai: " + caption +
+                            ". Is photo ke baare me kuch bhi poochho!")
+                elif err == "no_token":
+                    _ans = ("Photo mil gayi! 📷 Lekin photo padhne ke liye "
+                            "Streamlit me HF_TOKEN add karna hoga (App settings → "
+                            "Secrets). Tab SAIME photo dekh ke sare jawab dega!")
+                else:
+                    _ans = ("Photo mil gayi! 📷 Lekin abhi photo padh nahi paya. "
+                            "Dobara try karo!")
+                st.session_state.messages.append(
+                    {"role": "assistant", "content": _ans})
+                st.rerun()
 
 if prompt:
     st.session_state.messages.append({"role": "user", "content": prompt})
     wa_bubble(prompt, "user")
     save_idea(prompt)
     tasks = split_tasks(prompt)
-    last_answer = ""
     for task in tasks:
         # Photo ka context — agar photo bheji hai to SAIME use dekh ke jawab de
         _task = task
         if st.session_state.get("photo_caption"):
             _task = ("Photo me ye hai: " + st.session_state.photo_caption
                      + ". Sawal: " + task)
-        st.markdown("<div class='wa-typing'>🤖 Team kaam kar rahi hai...</div>",
+        st.markdown("<div class='wa-typing'>Typing...</div>",
                     unsafe_allow_html=True)
-        # TEAM: ek kaam ko kai agents mil ke solve karein (quality mode ke saath)
+        # TEAM: ek kaam ko kai agents mil ke solve karein
+        # (Frequency + Time — Info popup se)
         answer, source, team, steps = run_team(
             _task, st.session_state.messages[:-1], model, tok,
-            mode=st.session_state.get("quality", "low"))
-        wa_bubble(answer, "ai", source, team)
+            freq=st.session_state.get("freq", "low"),
+            time=st.session_state.get("time", "less"))
+        wa_bubble(answer, "ai")
         st.session_state.messages.append(
-            {"role": "assistant", "content": answer, "source": source, "team": team})
-        last_answer = answer
-    st.session_state.last_audio = speak(last_answer)
+            {"role": "assistant", "content": answer})
     st.rerun()
