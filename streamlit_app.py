@@ -147,6 +147,82 @@ def web_search(question):
     return None, None
 
 
+def web_search_all(question):
+    """SABHI sources se jawab dhoondho — Hard mode ke liye.
+    DuckDuckGo instant + DuckDuckGo Lite + Wikipedia — har source ka jawab
+    alag se. Wapas deta hai: [(jawab, source), ...]."""
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    out = []
+    seen_src = set()
+
+    def _add(ans, src):
+        if ans and src and src not in seen_src:
+            seen_src.add(src)
+            out.append((ans, src))
+
+    # 1. DuckDuckGo instant answer
+    try:
+        q = urllib.parse.quote(question)
+        url = "https://api.duckduckgo.com/?q=" + q + "&format=json&no_html=1&skip_disambig=1"
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=10) as r:
+            data = json.loads(r.read().decode("utf-8"))
+        _add((data.get("AbstractText") or "").strip(), "DuckDuckGo")
+    except Exception as e:
+        print("Web search all (instant) error:", e)
+    # 2. DuckDuckGo Lite — pehla accha snippet + ASLI source
+    try:
+        q = urllib.parse.quote(question)
+        url = "https://lite.duckduckgo.com/lite/?q=" + q
+        req3 = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req3, timeout=12) as r3:
+            page = r3.read().decode("utf-8", errors="ignore")
+        uddgs = re.findall(r"uddg=([^&\"']+)", page)
+        snippets = re.findall(r"class='result-snippet'[^>]*>(.*?)</td>", page, re.DOTALL)
+        for i, s in enumerate(snippets):
+            text = re.sub(r"<[^>]+>", " ", s)
+            text = html_lib.unescape(text).strip()
+            text = re.sub(r"\s+", " ", text)
+            if len(text) > 25:
+                domain = "duckduckgo.com"
+                if i < len(uddgs):
+                    try:
+                        real_url = urllib.parse.unquote(uddgs[i])
+                        domain = urllib.parse.urlparse(real_url).netloc or domain
+                        domain = domain.replace("www.", "")
+                    except Exception:
+                        pass
+                _add(text, domain)
+                break
+    except Exception as e:
+        print("Web search all (lite) error:", e)
+    # 3. Wikipedia — relevant article ka summary
+    try:
+        q = urllib.parse.quote(question)
+        url = ("https://en.wikipedia.org/w/api.php?action=query&list=search"
+               "&srsearch=" + q + "&format=json&srlimit=1")
+        req2 = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req2, timeout=10) as r2:
+            wdata = json.loads(r2.read().decode("utf-8"))
+        results = wdata.get("query", {}).get("search", [])
+        if results:
+            title = results[0]["title"]
+            stop = {"what", "is", "the", "a", "an", "how", "why", "when", "where",
+                    "kaunsa", "kaun", "kya", "hai", "hota", "karte", "kitne", "par"}
+            qwords = set(re.findall(r"[a-zA-Z\u0900-\u097F]+", question.lower())) - stop
+            twords = set(re.findall(r"[a-zA-Z\u0900-\u097F]+", title.lower()))
+            if not qwords or (qwords & twords):
+                sum_url = ("https://en.wikipedia.org/api/rest_v1/page/summary/"
+                           + urllib.parse.quote(title))
+                req2b = urllib.request.Request(sum_url, headers=headers)
+                with urllib.request.urlopen(req2b, timeout=10) as r2b:
+                    sdata = json.loads(r2b.read().decode("utf-8"))
+                _add((sdata.get("extract") or "").strip(), "Wikipedia")
+    except Exception as e:
+        print("Web search all (wiki) error:", e)
+    return out
+
+
 FAQ = {
     "hello": "Hello! Main SAIME hoon. Tumhara sawal poochho, main jawab dunga!",
     "hi": "Hi! Main SAIME hoon. Kya poochhna hai?",
@@ -362,6 +438,119 @@ AGENT_INFO = {
 }
 
 
+def run_team(task, history, model, tok, mode="low"):
+    """Ek kaam ko MULTIPLE agents MIL KE solve karein — team work.
+    🔎 Search Agent facts dhoondhta hai, 🧮 Math Agent hisaab karta hai,
+    💬 Chat Agent jawab banata hai, ✍️ Writer Agent use saaf likhta hai.
+    mode: 'low' = sirf model (fast, default), 'medium' = model + web check
+    (sabse accurate), 'hard' = SABHI sources jod ke ek complete jawab.
+    Returns (final_answer, source, team_list, steps)."""
+    team = []
+    steps = []
+    facts = None
+    source = None
+    calc = None
+    expr = None
+
+    # Pehle FAQ — pehchan/greeting jaise sawal seedha Chat Agent se.
+    clean = task.strip().lower()
+    if clean in FAQ:
+        answer = FAQ[clean]
+        save_learned_qa(task, answer)
+        return answer, None, ["chat"], ["💬 Chat Agent: ye to mujhe pehle se pata hai!"]
+
+    # LOW mode — sirf model, fast default (koi web search nahi)
+    if mode == "low":
+        team.append("chat")
+        steps.append("💬 Chat Agent: fast jawab de raha hoon...")
+        expr = detect_math(task)
+        if expr:
+            calc = safe_calc(expr)
+            if calc is not None:
+                if isinstance(calc, float) and calc.is_integer():
+                    calc = int(calc)
+                team.insert(0, "math")
+                answer = task.strip() + " = " + str(calc)
+                save_learned_qa(task, answer)
+                return answer, None, team, steps
+        answer, _src = ask_satya(task, history, model, tok)
+        if _src and not source:
+            source = _src
+        save_learned_qa(task, answer)
+        return answer, source, team, steps
+
+    # 1. Search Agent — facts dhoondho (agar sawal factual hai)
+    # Poore shabd milao — "kahani" me "kahan" na mile, isliye word-boundary check.
+    low = task.lower()
+    _words = set(re.findall(r"[a-zA-Z\u0900-\u097F]+", low))
+    if (_words & set(FACT_WORDS)) or "?" in task:
+        team.append("search")
+        if mode == "hard":
+            steps.append("🔎 Search Agent: SABHI sources se dhoondh raha hoon...")
+            all_src = web_search_all(task)
+            if all_src:
+                facts = all_src[0][0]
+                source = ", ".join(s for _, s in all_src)
+                steps.append("🔎 Search Agent: " + str(len(all_src)) + " sources mil gaye!")
+                # HARD: sabhi sources + model ka jawab jod ke ek complete jawab
+                _model_ans, _ = ask_satya(task, history, model, tok)
+                _parts = [a for a, _ in all_src]
+                if _model_ans and not is_gibberish(_model_ans):
+                    _parts.append(_model_ans)
+                # Duplicate hatake jodo — ek complete, powerful jawab
+                _seen = set()
+                _uniq = []
+                for _p in _parts:
+                    _k = _p[:60].lower()
+                    if _k not in _seen:
+                        _seen.add(_k)
+                        _uniq.append(_p)
+                answer = "\n\n".join(_uniq)
+                save_learned_qa(task, answer)
+                if "chat" not in team:
+                    team.append("chat")
+                return answer, source, team, steps
+        else:
+            steps.append("🔎 Search Agent: facts dhoondh raha hoon...")
+            facts, source = web_search(task)
+            if facts:
+                steps.append("🔎 Search Agent: facts mil gaye!")
+    # 2. Math Agent — hisaab karo (agar hisaab hai)
+    expr = detect_math(task)
+    if expr:
+        team.append("math")
+        steps.append("🧮 Math Agent: hisaab kar raha hoon...")
+        calc = safe_calc(expr)
+        if calc is not None:
+            if isinstance(calc, float) and calc.is_integer():
+                calc = int(calc)
+            steps.append("🧮 Math Agent: hisaab ho gaya!")
+    # 3. Chat Agent — sab kuch mila ke jawab banao
+    team.append("chat")
+    steps.append("💬 Chat Agent: jawab bana raha hoon...")
+    if facts and calc is not None:
+        answer = facts + "\n" + expr + " = " + str(calc)
+    elif facts:
+        answer = facts
+    elif calc is not None:
+        answer = task.strip() + " = " + str(calc)
+    else:
+        answer, _src = ask_satya(task, history, model, tok)
+        if _src and not source:
+            source = _src
+    # 4. Writer Agent — jawab ko saaf-suthra likho (lamba jawab ho to)
+    if len(answer) > 200 or any(w in low for w in _WRITE_WORDS):
+        team.append("writer")
+        steps.append("✍️ Writer Agent: jawab ko saaf likh raha hoon...")
+        polished, _ = ask_satya(
+            "Is jawab ko saaf aur acchi Hindi/English me likho: " + answer,
+            history, model, tok)
+        if polished and not is_gibberish(polished) and len(polished) > 10:
+            answer = polished
+    save_learned_qa(task, answer)
+    return answer, source, team, steps
+
+
 def run_agent(task, history, model, tok, forced=None):
     """Ek task ko uske agent se karwao — tool use karke, steps ke saath.
     Returns (answer, source, agent_key, steps)."""
@@ -509,27 +698,25 @@ with _hdr_r:
 st.markdown("<div style='border-bottom:1px solid #2a2f32; margin: 2px 0 10px;'></div>",
             unsafe_allow_html=True)
 
-# Agent picker — kaunsa agent kaam kare (Auto = SAIME khud chune)
-if "agent" not in st.session_state:
-    st.session_state.agent = "auto"
-_agent_cols = st.columns(5)
-for _col, _key in zip(_agent_cols, ["auto", "search", "math", "chat", "writer"]):
-    _emoji, _name = AGENT_INFO[_key]
-    _label = _emoji + " " + _name
-    if _col.button(_label, key="agent_" + _key,
-                   use_container_width=True,
-                   type="primary" if st.session_state.agent == _key else "secondary"):
-        st.session_state.agent = _key
-        st.rerun()
+# Multi-Agent Team — har kaam ko KAI agents mil ke solve karte hain
+st.markdown("<div style='text-align:center; font-size:13px; color:#8696a0; "
+            "padding:2px 0 10px;'>🤖 Multi-Agent Team: 🔎 Search + 🧮 Math + "
+            "💬 Chat + ✍️ Writer — ek saath ek kaam</div>",
+            unsafe_allow_html=True)
 
 
-def wa_bubble(text, who, source=None, agent=None):
+def wa_bubble(text, who, source=None, team=None):
     """WhatsApp jaisi bubble dikhao — user RIGHT green, AI LEFT grey.
-    AI bubble me upar agent ka naam (kaunsa agent kaam kiya)."""
+    AI bubble me upar TEAM dikhao (kaun-kaun se agents ne kaam kiya)."""
     safe = _html.escape(text)
     head = ""
-    if agent and agent in AGENT_INFO:
-        _emoji, _name = AGENT_INFO[agent]
+    if team and isinstance(team, list) and team:
+        _names = " + ".join(AGENT_INFO[t][0] + " " + AGENT_INFO[t][1]
+                            for t in team if t in AGENT_INFO)
+        head = ("<span style='display:block; font-size:11px; color:#53bdeb; "
+                "font-weight:700; margin-bottom:2px;'>" + _names + "</span>")
+    elif team and isinstance(team, str) and team in AGENT_INFO:
+        _emoji, _name = AGENT_INFO[team]
         head = ("<span style='display:block; font-size:11px; color:#53bdeb; "
                 "font-weight:700; margin-bottom:2px;'>" + _emoji + " " + _name + "</span>")
     src_html = ""
@@ -549,15 +736,33 @@ for m in st.session_state.messages:
         with _pc2:
             st.image(m["photo"], use_container_width=True)
         if m.get("content"):
-            wa_bubble(m["content"], m["role"], m.get("source"), m.get("agent"))
+            wa_bubble(m["content"], m["role"], m.get("source"), m.get("team", m.get("agent")))
     else:
-        wa_bubble(m["content"], m["role"], m.get("source"), m.get("agent"))
+        wa_bubble(m["content"], m["role"], m.get("source"), m.get("team", m.get("agent")))
 
 # Voice (aakhri jawab ki)
 if st.session_state.last_audio:
     st.audio(st.session_state.last_audio, format="audio/mp3")
 
 prompt = st.chat_input("Message likho... (kai task ek saath: har line ek task)")
+
+# Jawab ki quality — neeche option (Low = fast default, Medium = sabse accurate,
+# Hard = sabhi sources jod ke complete jawab)
+if "quality" not in st.session_state:
+    st.session_state.quality = "low"
+_q1, _q2, _q3 = st.columns(3)
+if _q1.button("🟢 Low — Fast", key="q_low", use_container_width=True,
+              type="primary" if st.session_state.quality == "low" else "secondary"):
+    st.session_state.quality = "low"
+    st.rerun()
+if _q2.button("🟡 Medium — Accurate", key="q_med", use_container_width=True,
+              type="primary" if st.session_state.quality == "medium" else "secondary"):
+    st.session_state.quality = "medium"
+    st.rerun()
+if _q3.button("🔴 Hard — Complete", key="q_hard", use_container_width=True,
+              type="primary" if st.session_state.quality == "hard" else "secondary"):
+    st.session_state.quality = "hard"
+    st.rerun()
 
 # 📷 Photo upload — neeche (photo dekh ke SAIME jawab dega)
 photo = st.file_uploader("📷 Photo bhejo — SAIME dekh ke jawab dega",
@@ -581,7 +786,7 @@ if photo is not None:
             _ans = "Photo me ye dikh raha hai: " + caption + ". Is photo ke baare me kuch bhi poochho!"
             wa_bubble(_ans, "ai", None, "chat")
             st.session_state.messages.append(
-                {"role": "assistant", "content": _ans, "agent": "chat"})
+                {"role": "assistant", "content": _ans, "team": ["chat"]})
             st.session_state.last_audio = speak(_ans)
         elif err == "no_token":
             _ans = ("Photo mil gayi! 📷 Lekin photo padhne ke liye Streamlit me "
@@ -590,13 +795,13 @@ if photo is not None:
                     "dekh ke sare jawab dega!")
             wa_bubble(_ans, "ai", None, "chat")
             st.session_state.messages.append(
-                {"role": "assistant", "content": _ans, "agent": "chat"})
+                {"role": "assistant", "content": _ans, "team": ["chat"]})
         else:
             _ans = ("Photo mil gayi! 📷 Lekin abhi photo padh nahi paya "
                     "(server busy ho sakta hai). Dobara try karo!")
             wa_bubble(_ans, "ai", None, "chat")
             st.session_state.messages.append(
-                {"role": "assistant", "content": _ans, "agent": "chat"})
+                {"role": "assistant", "content": _ans, "team": ["chat"]})
         st.rerun()
 
 if prompt:
@@ -604,7 +809,6 @@ if prompt:
     wa_bubble(prompt, "user")
     save_idea(prompt)
     tasks = split_tasks(prompt)
-    forced = st.session_state.agent
     last_answer = ""
     for task in tasks:
         # Photo ka context — agar photo bheji hai to SAIME use dekh ke jawab de
@@ -612,13 +816,15 @@ if prompt:
         if st.session_state.get("photo_caption"):
             _task = ("Photo me ye hai: " + st.session_state.photo_caption
                      + ". Sawal: " + task)
-        st.markdown("<div class='wa-typing'>Agent kaam kar raha hai...</div>",
+        st.markdown("<div class='wa-typing'>🤖 Team kaam kar rahi hai...</div>",
                     unsafe_allow_html=True)
-        answer, source, agent_key, steps = run_agent(
-            _task, st.session_state.messages[:-1], model, tok, forced)
-        wa_bubble(answer, "ai", source, agent_key)
+        # TEAM: ek kaam ko kai agents mil ke solve karein (quality mode ke saath)
+        answer, source, team, steps = run_team(
+            _task, st.session_state.messages[:-1], model, tok,
+            mode=st.session_state.get("quality", "low"))
+        wa_bubble(answer, "ai", source, team)
         st.session_state.messages.append(
-            {"role": "assistant", "content": answer, "source": source, "agent": agent_key})
+            {"role": "assistant", "content": answer, "source": source, "team": team})
         last_answer = answer
     st.session_state.last_audio = speak(last_answer)
     st.rerun()
