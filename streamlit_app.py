@@ -77,8 +77,21 @@ def web_search(question):
     """Kahi se bhi check karke jawab dhoondho — 30+ sources!
     DuckDuckGo, Wikipedia, Britannica, GeeksforGeeks, Stack Overflow, BBC,
     Reuters, GitHub, aur bhi. Jawab ke saath ASLI source ka naam milta hai.
+    Hindi sawal ho to English me translate karke search karo — web ko
+    English query pe behtar result milta hai.
     Wapas deta hai: (jawab, source_ka_naam)."""
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+
+    # Hindi (Roman ya Devanagari) sawal ho to English me badlo, phir search karo
+    _q = question
+    try:
+        if detect_language(question) == "hi":
+            _tr, _ = translate_text(question, "en")
+            if _tr:
+                _q = _tr
+    except Exception:
+        pass
+    question = _q
 
     # 1. DuckDuckGo instant answer (free, no key)
     try:
@@ -150,10 +163,20 @@ def web_search(question):
 def web_search_all(question):
     """SABHI sources se jawab dhoondho — Hard mode ke liye.
     DuckDuckGo instant + DuckDuckGo Lite + Wikipedia — har source ka jawab
-    alag se. Wapas deta hai: [(jawab, source), ...]."""
+    alag se. Hindi sawal ho to English me translate karke search karo.
+    Wapas deta hai: [(jawab, source), ...]."""
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     out = []
     seen_src = set()
+
+    # Hindi sawal ho to English me badlo, phir search karo
+    try:
+        if detect_language(question) == "hi":
+            _tr, _ = translate_text(question, "en")
+            if _tr:
+                question = _tr
+    except Exception:
+        pass
 
     def _add(ans, src):
         if ans and src and src not in seen_src:
@@ -276,7 +299,9 @@ FEWSHOT = ("Q: Who are you?\nA: I'm your Satya.\n"
 
 FACT_WORDS = ["what", "where", "when", "who", "whom", "whose", "which", "how", "why",
               "kya", "kaun", "kaunsa", "kaunsi", "kitne", "kitna", "kab", "kahan",
-              "kaise", "kyun", "kisne", "kisko", "konsa", "konsi"]
+              "kaise", "kaisa", "kaisi", "kyun", "kisne", "kisko", "konsa", "konsi",
+              "mausam", "weather", "temperature", "tapman", "aaj", "kal", "parso",
+              "today", "tomorrow", "barish", "garmi", "thand", "hawa"]
 
 
 def is_gibberish(text):
@@ -405,8 +430,9 @@ def ask_satya(message, history, model, tok):
             answer = web_ans
             save_learned_qa(message, answer)
             return answer, source
-        elif not answer:
-            answer = "Mujhe ye nahi pata. Kuch aur poochho!"
+        # Web pe bhi nahi mila — gibberish ya khaali jawab user ko mat dikhao.
+        # Saaf-saaf bata do ki nahi pata, bakwas likhne se behtar hai.
+        answer = "Mujhe iska sahi jawab nahi pata. Dobara poochho ya kuch aur poochho!"
     save_learned_qa(message, answer)
     return answer, None
 
