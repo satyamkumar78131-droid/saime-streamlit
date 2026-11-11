@@ -303,7 +303,11 @@ def speak(text):
         return None
 
 
-# ---------- UI (ChatGPT jaisa) ----------
+# ---------- UI (WhatsApp jaisa) ----------
+# Pehle ekdam khali — na title, na banner, na suggestion, na sidebar.
+# User puche to uska message RIGHT (green bubble), AI ka jawab LEFT (grey bubble).
+
+import html as _html
 
 model, tok, step = load_model()
 
@@ -312,84 +316,77 @@ if "messages" not in st.session_state:
 if "last_audio" not in st.session_state:
     st.session_state.last_audio = None
 
-# Sidebar — ChatGPT jaisa (New chat + history + model info)
-with st.sidebar:
-    st.image("saime-logo.png", width=56)
-    st.markdown("## SAIME")
-    if st.button("＋ New chat", use_container_width=True):
-        st.session_state.messages = []
-        st.session_state.last_audio = None
-        st.rerun()
-    st.markdown("---")
-    st.markdown("**Chats**")
-    seen = []
-    for m in st.session_state.messages:
-        if m["role"] == "user" and m["content"] not in seen:
-            seen.append(m["content"])
-    if seen:
-        for q in seen[-10:]:
-            if st.button("💬 " + (q[:28] + "…" if len(q) > 28 else q),
-                         key="hist_" + str(hash(q)), use_container_width=True):
-                st.session_state.pending = q
-    else:
-        st.caption("Abhi koi chat nahi hai.")
-    st.markdown("---")
-    st.caption(f"● Online — SATYA V1 (step {step}, 49.6M params)")
-    st.caption("Hindi + English + Hinglish")
+# Streamlit ka sara extra UI chhupao — badge, menu, header, toolbar, deploy
+# button, status widget — taaki sirf chat dikhe, koi ad/button na aaye.
+st.markdown("""
+<style>
+#MainMenu {visibility: hidden;}
+footer {visibility: hidden;}
+header {visibility: hidden;}
+.stDeployButton {visibility: hidden;}
+[data-testid="stToolbar"] {visibility: hidden;}
+[data-testid="stDecoration"] {visibility: hidden;}
+[data-testid="stStatusWidget"] {visibility: hidden;}
+[data-testid="stAppViewContainer"] > .main {padding-top: 0;}
+/* WhatsApp jaisa chat header */
+.wa-header { display: flex; align-items: center; gap: 10px; padding: 8px 4px 10px; border-bottom: 1px solid #2a2f32; margin-bottom: 8px; }
+.wa-header img { width: 40px; height: 40px; border-radius: 50%; }
+.wa-header .name { font-size: 17px; font-weight: 700; line-height: 1.2; }
+.wa-header .status { font-size: 12px; color: #8696a0; line-height: 1.2; }
+/* WhatsApp jaisi bubbles */
+.wa-row { display: flex; margin: 6px 0; }
+.wa-row.user { justify-content: flex-end; }
+.wa-row.ai { justify-content: flex-start; }
+.wa-bubble { max-width: 78%; padding: 8px 12px; border-radius: 12px; line-height: 1.45; font-size: 15px; white-space: pre-wrap; word-wrap: break-word; }
+.wa-bubble.user { background: #005c4b; color: #e7ffdb; border-bottom-right-radius: 2px; }
+.wa-bubble.ai { background: #202c33; color: #e9edef; border-bottom-left-radius: 2px; }
+.wa-bubble .src { display: block; font-size: 11px; color: #8696a0; margin-top: 4px; }
+.wa-typing { color: #8696a0; font-style: italic; font-size: 14px; padding: 6px 4px; }
+</style>
+""", unsafe_allow_html=True)
 
-# Upar — ChatGPT jaisa model naam
-st.markdown("<div style='text-align:center; font-size:19px; font-weight:700; padding:6px 0 2px;'>SAIME</div>",
-            unsafe_allow_html=True)
-st.markdown("<div style='text-align:center; font-size:12px; color:gray; padding-bottom:10px;'>Tumhara apna AI — SATYA V1</div>",
-            unsafe_allow_html=True)
-
-# Welcome screen — ChatGPT jaisa (khali chat me beech me greeting + suggestion cards)
-if not st.session_state.messages:
-    _l, _c, _r = st.columns([1, 1, 1])
-    with _c:
-        st.image("saime-logo.png", width=88)
-    st.markdown("<div style='text-align:center; font-size:26px; font-weight:700; padding:8px 0 24px;'>How can I help you?</div>",
+# WhatsApp jaisa header — logo + SAIME + online
+_hdr_l, _hdr_r = st.columns([1, 9])
+with _hdr_l:
+    st.image("saime-logo.png", width=40)
+with _hdr_r:
+    st.markdown("<div class='name' style='font-size:17px; font-weight:700;'>SAIME</div>"
+                "<div class='status' style='font-size:12px; color:#8696a0;'>online</div>",
                 unsafe_allow_html=True)
-    # Suggestion cards — 2x2 grid, ChatGPT jaisa
-    suggestions = ["Who are you?", "Tum kaun ho?",
-                   "What is the capital of India?", "5 + 3 kitna hota hai?"]
-    for row in range(0, 4, 2):
-        cols = st.columns(2)
-        for col, sugg in zip(cols, suggestions[row:row + 2]):
-            if col.button(sugg, use_container_width=True, key="sugg_" + sugg):
-                st.session_state.pending = sugg
+st.markdown("<div style='border-bottom:1px solid #2a2f32; margin: 2px 0 10px;'></div>",
+            unsafe_allow_html=True)
 
-# SAIME logo — assistant avatar ke liye (GitHub raw URL, app me image avatar)
-LOGO_URL = "https://raw.githubusercontent.com/satyamkumar78131-droid/saime-streamlit/main/saime-logo.png"
 
-# Pichla chat dikhao — avatar ke saath, ChatGPT jaisa
+def wa_bubble(text, who, source=None):
+    """WhatsApp jaisi bubble dikhao — user RIGHT green, AI LEFT grey."""
+    safe = _html.escape(text)
+    src_html = ""
+    if source:
+        src_html = "<span class='src'>🔎 Source: " + _html.escape(str(source)) + "</span>"
+    st.markdown(
+        "<div class='wa-row " + who + "'><div class='wa-bubble " + who + "'>"
+        + safe + src_html + "</div></div>",
+        unsafe_allow_html=True,
+    )
+
+
+# Pichla chat dikhao — WhatsApp bubbles
 for m in st.session_state.messages:
-    avatar = "👤" if m["role"] == "user" else LOGO_URL
-    with st.chat_message(m["role"], avatar=avatar):
-        st.markdown(m["content"])
-        if m.get("source"):
-            st.caption(f"🔎 Source: {m['source']}")
+    wa_bubble(m["content"], m["role"], m.get("source"))
 
 # Voice (aakhri jawab ki)
 if st.session_state.last_audio:
     st.audio(st.session_state.last_audio, format="audio/mp3")
 
-prompt = st.chat_input("Sawal likho...")
-if "pending" in st.session_state and st.session_state.pending:
-    prompt = st.session_state.pending
-    st.session_state.pending = None
-
+prompt = st.chat_input("Message likho...")
 if prompt:
     st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user", avatar="👤"):
-        st.markdown(prompt)
+    wa_bubble(prompt, "user")
     save_idea(prompt)
-    with st.chat_message("assistant", avatar=LOGO_URL):
-        with st.spinner("Soch raha hoon..."):
-            answer, source = ask_satya(prompt, st.session_state.messages[:-1], model, tok)
-        st.markdown(answer)
-        if source:
-            st.caption(f"🔎 Source: {source}")
+    with st.spinner(""):
+        st.markdown("<div class='wa-typing'>SAIME typing...</div>", unsafe_allow_html=True)
+        answer, source = ask_satya(prompt, st.session_state.messages[:-1], model, tok)
+    wa_bubble(answer, "ai", source)
     st.session_state.messages.append({"role": "assistant", "content": answer, "source": source})
     st.session_state.last_audio = speak(answer)
     st.rerun()
