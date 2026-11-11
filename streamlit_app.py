@@ -36,6 +36,16 @@ MAX_NEW_TOKENS = 40  # quick answer — chhota aur tez jawab
 
 st.set_page_config(page_title="SAIME", page_icon="💜", layout="centered")
 
+# Streamlit ka footer/menu chhupao — "Hosted with Streamlit" badge, menu aur
+# upar wala bar na dikhe, app bilkul apna lage.
+st.markdown("""
+<style>
+#MainMenu {visibility: hidden;}
+footer {visibility: hidden;}
+header {visibility: hidden;}
+</style>
+""", unsafe_allow_html=True)
+
 torch.set_num_threads(2)
 
 
