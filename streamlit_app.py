@@ -1114,13 +1114,13 @@ with _info_l:
                    "Medium: kai sources se accurate jawab + related info. "
                    "High: sabhi sources jod ke + Gemini verify (hidden).")
         st.markdown("**Time**")
-        _time = st.radio(
+        _time_choice = st.radio(
             "Time",
             ["Less", "Medium", "High"],
             index=["less", "medium", "high"].index(st.session_state.time),
             horizontal=True, label_visibility="collapsed",
             key="time_radio")
-        st.session_state.time = _time.lower()
+        st.session_state.time = _time_choice.lower()
         st.caption("Less: ~1 second. Medium: ~3 seconds. "
                    "High: 3–5 seconds, sabse powerful jawab.")
         st.markdown("**Font**")
