@@ -992,6 +992,9 @@ header {visibility: hidden;}
 .wa-label.user { text-align: right; }
 .wa-typing { color: #8696a0; font-style: italic; font-size: 14px; padding: 6px 4px; }
 .wa-thanks { font-size: 12px; color: #25d366; margin: 2px 0 6px 4px; }
+/* Jawab ke neeche source ka logo + naam */
+.wa-source { display: flex; align-items: center; gap: 5px; font-size: 11px; color: #8696a0; margin: 2px 0 6px 4px; }
+.wa-source img { width: 16px; height: 16px; border-radius: 3px; }
 /* Info button — medium size, left side (mobile pe columns stack ho jate hain,
    isliye popover ki width CSS se fix karo) */
 div[data-testid="stPopover"] { width: 150px !important; }
@@ -1021,6 +1024,29 @@ def bubble_html(text, who):
     return ("<div class='wa-row " + who + "'><div style='max-width:78%;'>"
             + label + "<div class='wa-bubble " + who + "'>" + safe
             + "</div></div></div>")
+
+
+def source_logo_html(source):
+    """Jawab ke neeche ASLI source ka logo + naam dikhao.
+    Source ek domain (mausam.imd.gov.in), naam (DuckDuckGo/Wikipedia)
+    ya comma-list ho sakta hai. Logo Google favicon service se aata hai —
+    har website ka asli logo."""
+    if not source:
+        return ""
+    _domain_map = {"duckduckgo": "duckduckgo.com",
+                   "wikipedia": "wikipedia.org"}
+    _parts = [s.strip() for s in str(source).split(",") if s.strip()]
+    _items = []
+    for _s in _parts[:2]:
+        _dom = _domain_map.get(_s.lower(), _s).replace("www.", "")
+        _fav = ("https://www.google.com/s2/favicons?domain="
+                + urllib.parse.quote(_dom) + "&sz=32")
+        _items.append("<img src='" + _fav + "' alt=''>"
+                      "<span>" + _html.escape(_dom) + "</span>")
+    if not _items:
+        return ""
+    return ("<div class='wa-source'><span>🔎 Source:</span> "
+            + " &nbsp; ".join(_items) + "</div>")
 
 
 def wa_bubble(text, who):
@@ -1099,10 +1125,16 @@ for _i, m in enumerate(st.session_state.messages):
             wa_bubble(m["content"], m["role"])
             if m["role"] == "assistant":
                 ai_actions(_i, m["content"])
+                if m.get("source"):
+                    st.markdown(source_logo_html(m["source"]),
+                                unsafe_allow_html=True)
     else:
         wa_bubble(m["content"], m["role"])
         if m["role"] == "assistant":
             ai_actions(_i, m["content"])
+            if m.get("source"):
+                st.markdown(source_logo_html(m["source"]),
+                            unsafe_allow_html=True)
 
 prompt = st.chat_input("Message likho...")
 
@@ -1214,6 +1246,9 @@ if prompt:
         _typing.empty()
         # Typing animation se jawab dikhao — jaise AI real time me likh raha ho
         typewriter_bubble(answer)
+        # Jawab ke neeche ASLI source ka logo + naam
+        if source:
+            st.markdown(source_logo_html(source), unsafe_allow_html=True)
         st.session_state.messages.append(
-            {"role": "assistant", "content": answer})
+            {"role": "assistant", "content": answer, "source": source})
     st.rerun()
