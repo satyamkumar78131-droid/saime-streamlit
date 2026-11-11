@@ -724,6 +724,17 @@ _LANG_WORDS = {
 }
 
 
+_EN_COMMON = {"the", "is", "a", "an", "in", "of", "to", "and", "or", "it",
+              "this", "that", "i", "you", "he", "she", "we", "they", "my",
+              "your", "his", "her", "our", "their", "am", "are", "was", "were",
+              "have", "has", "had", "do", "does", "did", "will", "would", "can",
+              "could", "should", "what", "when", "where", "who", "which", "how",
+              "why", "hello", "hi", "how", "are", "you", "name", "capital",
+              "india", "largest", "biggest", "planet", "city", "water", "good",
+              "bad", "big", "small", "great", "best", "new", "old", "time",
+              "people", "today", "year", "month", "week", "day", "night"}
+
+
 def detect_language(text):
     """User ki language pehchano — script + common words se (koi API nahi, fast).
     Devanagari = hi, Cyrillic = ru, Arabic script = ar,
@@ -752,7 +763,7 @@ def detect_language(text):
     for _lang, _vocab in _LANG_WORDS.items():
         if len(_words & _vocab) >= 2:
             return _lang
-    if len(_words & set(KNOWN)) / len(_words) >= 0.5:
+    if len(_words & _EN_COMMON) / len(_words) >= 0.5:
         return "en"
     return "en"
 
@@ -901,6 +912,10 @@ header {visibility: hidden;}
 .wa-bubble.user { background: #005c4b; color: #e7ffdb; border-bottom-right-radius: 2px; }
 .wa-bubble.ai { background: #202c33; color: #e9edef; border-bottom-left-radius: 2px; }
 .wa-typing { color: #8696a0; font-style: italic; font-size: 14px; padding: 6px 4px; }
+/* Info button — medium size, left side (mobile pe columns stack ho jate hain,
+   isliye popover ki width CSS se fix karo) */
+div[data-testid="stPopover"] { width: 150px !important; }
+div[data-testid="stPopover"] > button { width: 150px !important; }
 </style>
 """, unsafe_allow_html=True)
 
