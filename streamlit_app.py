@@ -529,6 +529,10 @@ def run_team(task, history, model, tok, freq="low", time="less"):
         answer, _src = ask_satya(task, history, model, tok)
         if _src and not source:
             source = _src
+        # Fast + sahi: factual sawal ho to Google se check karke galat jawab sahi karo
+        answer, _gsrc = google_correct(task, answer)
+        if _gsrc and not source:
+            source = _gsrc
         save_learned_qa(task, answer)
         return answer, source, team, steps
 
@@ -689,6 +693,118 @@ def describe_photo(image_bytes):
     except Exception as e:
         print("Photo describe error:", e)
         return None, "api_error"
+
+
+_LANG_WORDS = {
+    # Roman Hindi (Hinglish) — pehle check karo, ye user ki main language hai
+    "hi": {"tum", "kaun", "kya", "hai", "ho", "mera", "tera", "kaise", "kab",
+           "kahan", "kitne", "batao", "karo", "mujhe", "tumhara", "aap", "kyun",
+           "suno", "dekho", "chahiye", "raha", "rahi", "kaisa", "kaisi", "naam",
+           "bhai", "yaar", "acha", "accha", "theek", "matlab", "abhi", "kal"},
+    "es": {"hola", "que", "como", "cómo", "estas", "estás", "gracias", "por",
+           "favor", "el", "la", "los", "las", "es", "son", "una", "con", "para",
+           "estoy", "eres", "muy", "buenos", "dias"},
+    "fr": {"bonjour", "comment", "merci", "je", "tu", "il", "est", "les", "des",
+           "une", "avec", "pour", "vous", "allez", "suis", "etes", "êtes", "bien"},
+    "pt": {"ola", "olá", "como", "voce", "você", "obrigado", "por", "favor", "eu",
+           "sou", "esta", "está", "estou", "muito", "bom", "dia", "tudo", "bem"},
+    "it": {"ciao", "come", "stai", "grazie", "che", "per", "sono", "sei",
+           "buongiorno", "prego", "bene", "tutto", "questo", "sei"},
+    "de": {"hallo", "wie", "geht", "danke", "ich", "bin", "und", "die", "der",
+           "ist", "nicht", "gut", "sehr", "bitte", "schon", "gehts"},
+    "nl": {"hallo", "hoe", "gaat", "dank", "ik", "ben", "goed", "heel", "met",
+           "van", "een", "het", "niet", "graag"},
+    "tr": {"merhaba", "nasil", "nasıl", "nasılsın", "tesekkur", "teşekkür", "ben",
+           "sen", "iyi", "cok", "çok", "lutfen", "lütfen", "gunaydin", "evet",
+           "hayir", "hayır", "neden"},
+    "id": {"halo", "apa", "kabar", "terima", "kasih", "saya", "kamu", "baik",
+           "selamat", "pagi", "bagaimana", "tolong"},
+    "ru": {"privet", "kak", "dela", "spasibo", "pozhaluysta", "ya", "ty", "eto"},
+    "ar": {"marhaba", "kayfa", "haluka", "shukran", "ana", "anta", "ma", "hada"},
+}
+
+
+def detect_language(text):
+    """User ki language pehchano — script + common words se (koi API nahi, fast).
+    Devanagari = hi, Cyrillic = ru, Arabic script = ar,
+    Hiragana/Katakana = ja (kanji se pehle check — Japanese me dono hote hain),
+    Hangul = ko, CJK = zh, Thai = th,
+    Latin script = common words se (Roman Hindi pehle, phir es/fr/pt/it/de/nl/tr/id),
+    warna en."""
+    if re.search(r"[\u0900-\u097F]", text):
+        return "hi"
+    if re.search(r"[\u0400-\u04FF]", text):
+        return "ru"
+    if re.search(r"[\u0600-\u06FF]", text):
+        return "ar"
+    if re.search(r"[\u3040-\u30FF]", text):
+        return "ja"
+    if re.search(r"[\uAC00-\uD7AF]", text):
+        return "ko"
+    if re.search(r"[\u4E00-\u9FFF]", text):
+        return "zh"
+    if re.search(r"[\u0E00-\u0E7F]", text):
+        return "th"
+    # Latin script — saare Unicode letters pakdo (accent wale bhi: ó, á, ı, ç)
+    _words = set(re.findall(r"[^\W\d_]+", text.lower()))
+    if not _words:
+        return "en"
+    for _lang, _vocab in _LANG_WORDS.items():
+        if len(_words & _vocab) >= 2:
+            return _lang
+    if len(_words & set(KNOWN)) / len(_words) >= 0.5:
+        return "en"
+    return "en"
+
+
+def translate_text(text, target, source="auto"):
+    """Free MyMemory API se translate karo (koi key nahi chahiye).
+    source='auto' ho to autodetect use karo.
+    Returns (translated_text, source_lang) ya (None, None)."""
+    try:
+        src = source if source != "auto" else "autodetect"
+        url = ("https://api.mymemory.translated.net/get?q="
+               + urllib.parse.quote(text) + "&langpair=" + src + "|" + target)
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            data = json.loads(r.read().decode("utf-8"))
+        rd = data.get("responseData", {})
+        out = (rd.get("translatedText") or "").strip()
+        if not out or data.get("responseStatus") != 200:
+            return None, None
+        return out, source
+    except Exception as e:
+        print("Translate error:", e)
+        return None, None
+
+
+def google_correct(task, answer):
+    """Agar jawab galat ho to Google (web) se sahi karo — fast check.
+    Sirf factual sawalon pe: web se sahi jawab mil jaye to use hi final mano.
+    Returns (corrected_answer, source) ya (answer, None) agar web na mile."""
+    try:
+        low = task.lower()
+        _words = set(re.findall(r"[a-zA-Z\u0900-\u097F]+", low))
+        if not ((_words & set(FACT_WORDS)) or "?" in task):
+            return answer, None
+        facts, source = web_search(task)
+        if not facts:
+            return answer, None
+        # Web ka jawab hi sahi mano — model ka jawab galat ho sakta hai.
+        # Sirf CONTENT words milao (is/the/of jaise aam words nahi) — warna
+        # galat jawab bhi "milta-julta" lagta hai (jaise Mumbai vs New Delhi).
+        _STOP = {"is", "the", "of", "a", "an", "in", "on", "to", "and", "or",
+                 "ka", "ki", "ke", "hai", "kya", "what", "who", "where", "when",
+                 "why", "how", "yeh", "yah", "is", "mein", "se", "ko", "ne"}
+        _fw = set(re.findall(r"[a-zA-Z\u0900-\u097F]+", facts.lower())) - _STOP
+        _aw = set(re.findall(r"[a-zA-Z\u0900-\u097F]+", answer.lower())) - _STOP
+        _common = _fw & _aw
+        if len(_common) >= 3:
+            return answer, source
+        return facts, source
+    except Exception as e:
+        print("Google correct error:", e)
+        return answer, None
 
 
 def verify_with_gemini(question, answer):
@@ -881,7 +997,17 @@ if prompt:
     st.session_state.messages.append({"role": "user", "content": prompt})
     wa_bubble(prompt, "user")
     save_idea(prompt)
-    tasks = split_tasks(prompt)
+    # Translation (all-rounder): user ki language pehchano.
+    # Hindi/English nahi hai to sawal English me translate karke jawab do,
+    # phir jawab wapas user ki language me translate karo.
+    _lang = detect_language(prompt)
+    _needs_translate = _lang not in ("hi", "en")
+    _prompt_en = prompt
+    if _needs_translate:
+        _tr, _ = translate_text(prompt, "en")
+        if _tr:
+            _prompt_en = _tr
+    tasks = split_tasks(_prompt_en)
     for task in tasks:
         # Photo ka context — agar photo bheji hai to SAIME use dekh ke jawab de
         _task = task
@@ -896,6 +1022,11 @@ if prompt:
             _task, st.session_state.messages[:-1], model, tok,
             freq=st.session_state.get("freq", "low"),
             time=st.session_state.get("time", "less"))
+        # Jawab wapas user ki language me translate karo
+        if _needs_translate:
+            _tr_ans, _ = translate_text(answer, _lang)
+            if _tr_ans:
+                answer = _tr_ans
         wa_bubble(answer, "ai")
         st.session_state.messages.append(
             {"role": "assistant", "content": answer})
